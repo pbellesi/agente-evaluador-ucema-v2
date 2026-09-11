@@ -18,6 +18,10 @@ class DimensionResult(BaseModel):
         description="Lista de citas concretas de evidencia encontradas en el repositorio"
     )
     justification: str = Field(..., description="Justificación detallada de la puntuación")
+    improvement: Optional[str] = Field(
+        None,
+        description="Qué artefacto o evidencia falta para alcanzar el nivel siguiente o mejora"
+    )
     missing_for_next_level: Optional[str] = Field(
         None,
         description="Qué artefacto o evidencia falta para alcanzar el nivel siguiente (null si nivel es 100% o en error)"
@@ -43,4 +47,8 @@ class EvaluationResult(BaseModel):
     integrity_notes: List[str] = Field(
         default_factory=list,
         description="Notas sobre inconsistencias, falta de evidencia o intentos de prompt injection"
+    )
+    status: Optional[str] = Field(
+        default="OK",
+        description="Estado de ejecución"
     )

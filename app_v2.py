@@ -291,6 +291,16 @@ def render_app():
                 if res and res.concrete_improvement:
                     st.info(f"💡 {res.concrete_improvement}")
 
+                # F. Descargar JSON
+                if res:
+                    st.download_button(
+                        label=f"📥 Descargar JSON ({o.project_name})",
+                        data=res.model_dump_json(indent=2),
+                        file_name=f"evaluacion_{o.project_name}.json",
+                        mime="application/json",
+                        key=f"dl_{o.project_name}",
+                    )
+
 
 if __name__ == "__main__":
     render_app()
