@@ -14,13 +14,15 @@ El sistema V2 surge como una evolución iterativa y madura a partir de la primer
   Priorizaba la máxima reproducibilidad y la consistencia matemática mediante reglas fijas, extracción de palabras clave y métricas tabuladas. Aunque ofrecía costo nulo de inferencia y total determinismo, presentaba limitaciones para interpretar contradicciones semánticas complejas (por ejemplo, código hardcodeado que simula conectores reales o discrepancias entre lo declarado en el README y la evidencia física de las corridas).
 
 - **V2 (Enfoque Híbrido Semántico-Determinístico):**
-  Adopta el paradigma de razonamiento semántico manteniendo controles determinísticos estrictos.
+  Adopta el paradigma de razonamiento semántico con autoridad de scoring 100% determinística:
+  $$\text{Mismo Trabajo} + \text{Misma Versión del Evaluador} \implies \text{Mismos D1..D5 y Misma Nota Total, SIEMPRE}.$$
 
 > ### Principio Rector de V2:
-> **"El modelo interpreta. El runtime controla."**
+> **"El motor determinístico califica. El modelo enriquece."**
 
-1. **El modelo interpreta:** Un modelo de razonamiento multimodal/lenguaje comprende holísticamente el propósito del sistema, audita la coherencia entre documentación y código, detecta contradicciones o código simulado y genera hallazgos observacionales fundados.
-2. **El runtime controla:** El código del evaluador gestiona la ingesta segura en memoria, delimita el contexto, exige niveles discretos no negociables (0%, 25%, 50%, 75%, 100%), audita que las citas de archivos existan en el repositorio real y calcula la calificación final aplicando matemáticamente los pesos oficiales.
+1. **El motor determinístico califica (Autoridad Inmutable):** Las dimensiones D1 a D5, sus niveles (0%, 25%, 50%, 75%, 100%), los pesos oficiales (30, 25, 15, 15, 15) y la nota final (0-100) son calculados exclusivamente por el motor en Python aplicando la matriz de gates de evidencia objetiva de `rubrica.md`. Cero variabilidad estocástica.
+2. **El modelo enriquece (Analista Semántico):** El LLM (Gemini o NVIDIA) interpreta holísticamente el proyecto, genera comprensión arquitectónica (`project_understanding`), hallazgos observacionales clasificados (`findings`), sugerencias pedagógicas (`concrete_improvement`) y detección cualitativa de anomalías (`integrity_notes`), sin potestad para alterar los puntajes.
+3. **Resiliencia Total (Zero-API Fallback):** Si la cuota de la API se agota (HTTP 429), el servicio no responde (HTTP 503) o no hay API key disponible, la evaluación finaliza exitosamente con `status="OK"` y la calificación oficial calculada por los gates determinísticos.
 
 ---
 

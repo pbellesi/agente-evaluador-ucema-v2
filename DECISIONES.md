@@ -254,4 +254,29 @@ Las acciones fueron solicitadas y validadas por el coordinador. Codex no tomó d
 **Consecuencias:** El agente es ejecutable sólo en un entorno con workspace y terminal; un chat genérico sin herramientas no puede realizar una evaluación real. Streamlit permanece independiente y el scoring no cambia.<br>
 **Evidencia / archivos relacionados:** `agente/evaluate_tool.py`; `agente/system_prompt.md`; `agente/README.md`; commits `9527ede987eccfa9607fad818a8e2ee6b43e14e1` y `93468d713453f6293860005fbab220f840082b76`.<br>
 
+## DEC-019 — Autoridad inmutable del motor determinístico y rol del LLM como analista cualitativo en Evaluador V2
 
+**Estado:** Vigente<br>
+**Responsable / participantes:** Pablo Bellesi, coordinación y arquitectura.<br>
+**IA utilizada:** Antigravity (Google DeepMind), para diagnóstico, TDD, implementación y verificación test-retest.<br>
+**Contexto:**
+- Durante evaluaciones con modelos generativos (Gemini Flash) sobre trabajos reales de alumnos (notablemente `caso-02.zip`), se evidenció una fluctuación inaceptable de la calificación en corridas consecutivas (26.25 vs 15.00), causada por oscilaciones estocásticas en los niveles recomendados por el LLM en D3 y D5 (25% vs 75%).
+- Esta variabilidad vulnera el principio de justicia académica y reproducibilidad estricta.
+
+**Decisión:**
+1. **Autoridad de Scoring 100% Determinística:** La asignación de niveles (0%, 25%, 50%, 75%, 100%), pesos oficiales (30, 25, 15, 15, 15) y la nota final (0-100) quedan exclusivamente a cargo del motor determinístico en Python (`evaluate_repository_deterministically` y la matriz de gates de evidencia objetiva de `rubrica.md`).
+2. **Rol del LLM como Analista Semántico Cualitativo:** El LLM (Gemini / NVIDIA) no fija notas ni niveles. Se reserva estrictamente para generar hallazgos observacionales (`findings`), comprensión arquitectónica del proyecto (`project_understanding`), sugerencia de mejora pedagógica (`concrete_improvement`) y detección cualitativa de intentos de inyección o contradicciones (`integrity_notes`).
+3. **Resiliencia ante Errores de API (Zero-API Fallback):** Si el LLM no está disponible, no tiene API key configurada o devuelve errores de cuota o servicio (HTTP 429 Resource Exhausted, HTTP 503 Overloaded, Timeouts), la evaluación **no falla ni asigna nota 0**. Retorna la calificación determinística completa con `status="OK"` y un aviso explicativo.
+4. **Versionado de Evaluador y Clave de Caché:** Se define `EVALUATOR_VERSION = "v2-deterministic-score-1"`. La clave de caché en memoria es `f"{EVALUATOR_VERSION}:{zip_sha256}"`, garantizando que cualquier actualización en el motor invalide cachés anteriores automáticamente.
+
+**Evidencia / Resultado:**
+- Verificación test-retest de 3 pasadas sobre los 7 trabajos reales de alumnos:
+  - `caso-01.zip`: 90.00 / 90.00 / 90.00 (Varianza = 0.00)
+  - `caso-02.zip`: 40.00 / 40.00 / 40.00 (Varianza = 0.00)
+  - `caso-06.zip`: 93.75 / 93.75 / 93.75 (Varianza = 0.00)
+  - `tf-conciliador-a.zip`: 28.75 / 28.75 / 28.75 (Varianza = 0.00)
+  - `tf-conciliador-b.zip`: 28.75 / 28.75 / 28.75 (Varianza = 0.00)
+  - `tf-conciliador-c.zip`: 28.75 / 28.75 / 28.75 (Varianza = 0.00)
+  - `tf-conciliador-d.zip`: 28.75 / 28.75 / 28.75 (Varianza = 0.00)
+- Suite completa de 179 pruebas pasando en verde (179/179 PASS).
+- Prueba real con Gemini ante HTTP 429 confirmó preservación exacta de la nota determinística sin excepciones no controladas.
