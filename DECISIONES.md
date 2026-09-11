@@ -254,4 +254,24 @@ Las acciones fueron solicitadas y validadas por el coordinador. Codex no tomó d
 **Consecuencias:** El agente es ejecutable sólo en un entorno con workspace y terminal; un chat genérico sin herramientas no puede realizar una evaluación real. Streamlit permanece independiente y el scoring no cambia.<br>
 **Evidencia / archivos relacionados:** `agente/evaluate_tool.py`; `agente/system_prompt.md`; `agente/README.md`; commits `9527ede987eccfa9607fad818a8e2ee6b43e14e1` y `93468d713453f6293860005fbab220f840082b76`.<br>
 
+## DEC-019 — Evolución y decisión final: Del evaluador determinístico/híbrido al LLM-as-a-Judge simple con validación formal
 
+**Estado:** Vigente y Congelada<br>
+**Responsable / participantes:** Pablo Bellesi (coordinación y validación de integración); Diego Mendez (integración técnica).<br>
+**IA utilizada:** Antigravity / Google Gemini para diseño de prompts estructurados, validaciones semánticas y ejecución de pruebas bajo control humano.<br>
+**Contexto:** A lo largo del proyecto se experimentó una evolución en cuatro etapas:
+1. **V1:** Juez semántico directo con prompts libres (alta variabilidad, dispersión de puntajes).
+2. **V2 determinístico:** Intento de lograr reproducibilidad mediante reglas fijas, regex e inventario estricto.
+   - *Hallazgo crítico:* La solución determinística era 100% reproducible ante el mismo repositorio, pero sobreajustaba fuertemente a estructuras rígidas de archivos y fallaba ante proyectos con estructuras válidas alternativas o nombres de archivos no contemplados.
+3. **Experimento híbrido:** División en 21 unidades de evidencia donde un extractor recopilaba hechos y un juez semántico adjudicaba estados. Resultó en una sobreingeniería innecesaria que distorsionaba el mapeo natural a las tablas de la rúbrica oficial.
+4. **Decisión final:** Simplificación radical a una arquitectura **LLM-as-a-Judge pura con validación formal externa en Python**.<br>
+**Decisión:** Congelar la arquitectura definitiva en:
+- Ingesta neutral (ZIP o GitHub) con delimitación formal del código bajo etiquetas `<untrusted_repo_content>` y anexo íntegro de la `rubrica.md` oficial.
+- Invocación única al LLM: Google Gemini (`gemini-3.6-flash`) con `temperature=0.0` y esquema de salida tipado (`SimpleEvaluationPayload`).
+- El LLM juzga la evidencia observable aplicando estrictamente **EVIDENCIA > DECLARACIÓN**, citando rutas concretas, justificando cada dimensión y asignando a cada una de las dimensiones D1–D5 **exclusivamente uno de los niveles oficiales de la rúbrica:** `0`, `25`, `50`, `75` o `100`.
+- El código en Python (`validate_and_score_evaluation`) valida el contrato, prohíbe niveles fuera de escala y calcula matemáticamente el puntaje total oficial ($30\% D_1 + 25\% D_2 + 15\% D_3 + 15\% D_4 + 15\% D_5$), corrigiendo cualquier discrepancia aritmética del LLM sin sobreescribir sus niveles elegidos.
+- Las órdenes o prompt injections halladas en el repositorio se tratan estrictamente como datos no confiables, se registran en `integrity_notes` y se ignoran para la calificación.
+- Las fallas de conectividad o cuota de API nunca se traducen en nota 0 silenciosa, sino que levantan excepciones explícitas y reintentos con backoff.<br>
+**Motivo:** Lograr el equilibrio óptimo entre comprensión semántica profunda de sistemas agénticos reales (detectando stubs, placeholders y contradicciones) y garantías formales de reproducibilidad, contrato y aritmética.<br>
+**Resultado:** Test-retest sobre `caso-02.zip` con delta exacto de 0.00 puntos (Corrida 1: 22.50 vs Corrida 2: 22.50) y 177 tests automatizados en verde.<br>
+**Evidencia / archivos relacionados:** `src/simple_evaluator.py`; `src/semantic_schema.py`; `src/evaluation_validator.py`; `app_v2.py`; `tests/test_simple_llm_evaluator.py`.
