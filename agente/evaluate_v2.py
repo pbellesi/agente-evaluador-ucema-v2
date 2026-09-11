@@ -12,6 +12,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv()
+
 from src.context_builder import build_evidence_packet
 from src.evaluation_validator import validate_and_score_evaluation
 from src.github_fetcher import GitHubRequestError, fetch_repository_data

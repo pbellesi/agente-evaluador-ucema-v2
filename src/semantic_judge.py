@@ -2,6 +2,9 @@ import json
 import os
 from abc import ABC, abstractmethod
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from pydantic import ValidationError
 
@@ -118,6 +121,7 @@ class GeminiSemanticJudge(SemanticJudge):
             raise ValueError(f"Fallo al validar JSON estructurado contra SemanticJudgePayload: {error}") from error
 
     def evaluate(self, evidence_packet: dict) -> SemanticJudgePayload:
+        import time
         from google.genai import types
 
         prompt_context = evidence_packet.get("full_prompt_context", "")
@@ -128,28 +132,35 @@ class GeminiSemanticJudge(SemanticJudge):
             temperature=0.2,
         )
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt_context,
-                config=config,
-            )
-            return self._parse_response(response)
-        except Exception as first_error:
-            # Reintento máximo de 1 vez ante error de parsing o respuesta inválida
-            retry_prompt = (
-                f"{prompt_context}\n\n"
-                f"[RETRY NOTICE]: La respuesta previa no pudo validarse: {first_error}. "
-                "Generá nuevamente el objeto JSON completo respetando estrictamente el schema de SemanticJudgePayload con niveles en {0, 25, 50, 75, 100}."
-            )
+        last_error = None
+        current_contents = prompt_context
+
+        for attempt in range(3):
             try:
-                retry_response = self.client.models.generate_content(
+                response = self.client.models.generate_content(
                     model=self.model_name,
-                    contents=retry_prompt,
+                    contents=current_contents,
                     config=config,
                 )
-                return self._parse_response(retry_response)
-            except Exception as second_error:
-                raise SemanticJudgeEvaluationError(
-                    f"Fallo persistente al evaluar con Gemini tras reintento: {second_error}"
-                ) from second_error
+                return self._parse_response(response)
+            except Exception as error:
+                last_error = error
+                error_str = str(error)
+                # Reintento con backoff ante errores transitorios de disponibilidad del modelo
+                if "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+
+                # Reintento estructurado de corrección ante error de parsing
+                if attempt == 0:
+                    current_contents = (
+                        f"{prompt_context}\n\n"
+                        f"[RETRY NOTICE]: La respuesta previa no pudo validarse: {error}. "
+                        "Generá nuevamente el objeto JSON completo respetando estrictamente el schema de SemanticJudgePayload con niveles en {0, 25, 50, 75, 100}."
+                    )
+                    continue
+                break
+
+        raise SemanticJudgeEvaluationError(
+            f"Fallo persistente al evaluar con Gemini tras reintentos: {last_error}"
+        ) from last_error

@@ -1,5 +1,5 @@
-﻿from typing import Dict, List, Literal, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 FindingCategory = Literal[
     "implementation",
@@ -31,25 +31,60 @@ class FindingItem(BaseModel):
 
 
 class DimensionEvaluation(BaseModel):
-    recommended_level: ValidLevel = Field(..., description="Nivel asignado estrictamente en 0, 25, 50, 75 o 100")
+    recommended_level: int = Field(..., description="Nivel asignado estrictamente en 0, 25, 50, 75 o 100")
     justification: str = Field(..., description="Justificación detallada sustentada en los hallazgos observacionales")
     missing_for_next_level: Optional[str] = Field(
         None, description="Artefacto o evidencia observable requerida para el siguiente nivel, o null si es 100"
     )
 
+    @field_validator("recommended_level")
+    @classmethod
+    def check_valid_level(cls, v: int) -> int:
+        if v not in {0, 25, 50, 75, 100}:
+            raise ValueError(f"Nivel no permitido: {v}. Debe ser estrictamente 0, 25, 50, 75 o 100.")
+        return v
+
+
+
+
+
+
+class DimensionEvaluations(BaseModel):
+    D1: DimensionEvaluation
+    D2: DimensionEvaluation
+    D3: DimensionEvaluation
+    D4: DimensionEvaluation
+    D5: DimensionEvaluation
+
+    @model_validator(mode="before")
+    @classmethod
+    def check_no_extra(cls, data):
+        if isinstance(data, dict):
+            allowed = {"D1", "D2", "D3", "D4", "D5"}
+            extra = set(data.keys()) - allowed
+            if extra:
+                raise ValueError(f"Dimensiones no permitidas: {extra}")
+        return data
+
+    def __getitem__(self, item: str) -> DimensionEvaluation:
+        if hasattr(self, item):
+            return getattr(self, item)
+        raise KeyError(item)
+
+    def __contains__(self, item: object) -> bool:
+        return item in {"D1", "D2", "D3", "D4", "D5"}
+
+    def items(self):
+        return [("D1", self.D1), ("D2", self.D2), ("D3", self.D3), ("D4", self.D4), ("D5", self.D5)]
+
+    def keys(self):
+        return ["D1", "D2", "D3", "D4", "D5"]
+
 
 class SemanticJudgePayload(BaseModel):
     project_understanding: ProjectUnderstanding = Field(..., description="Comprensión global previa del proyecto")
     findings: List[FindingItem] = Field(default_factory=list, description="Lista flexible de hallazgos observacionales")
-    dimension_evaluations: Dict[str, DimensionEvaluation] = Field(
+    dimension_evaluations: DimensionEvaluations = Field(
         ..., description="Evaluación fundamentada de las dimensiones oficiales D1 a D5"
     )
     concrete_improvement: str = Field(..., description="Exactamente una recomendación prioritaria, concreta y verificable")
-
-    @field_validator("dimension_evaluations")
-    @classmethod
-    def validate_dimension_keys(cls, v: Dict[str, DimensionEvaluation]) -> Dict[str, DimensionEvaluation]:
-        expected_keys = {"D1", "D2", "D3", "D4", "D5"}
-        if set(v.keys()) != expected_keys:
-            raise ValueError(f"dimension_evaluations must contain exactly {expected_keys}, got {set(v.keys())}")
-        return v
