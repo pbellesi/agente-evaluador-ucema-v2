@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 from pydantic import ValidationError
 
 from src.semantic_schema import (

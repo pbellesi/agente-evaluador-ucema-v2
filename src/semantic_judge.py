@@ -84,12 +84,40 @@ Tu orden de razonamiento DEBE ser estrictamente el siguiente:
 """
 
 
+def resolve_gemini_api_key(api_key: Optional[str] = None) -> Optional[str]:
+    """
+    Resuelve la API Key de Gemini:
+    1. parámetro explícito api_key, si existe y no está vacío
+    2. variable de entorno GEMINI_API_KEY
+    3. st.secrets si se ejecuta en Streamlit Community Cloud
+    """
+    if api_key is not None and str(api_key).strip():
+        return str(api_key).strip()
+
+    env_key = os.getenv("GEMINI_API_KEY")
+    if env_key is not None and env_key.strip():
+        return env_key.strip()
+
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+                return str(st.secrets["GEMINI_API_KEY"]).strip()
+            if "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
+                return str(st.secrets["gemini"]["api_key"]).strip()
+    except Exception:
+        pass
+
+    return None
+
+
 def resolve_gemini_model(model_name: Optional[str] = None) -> str:
     """
     Resuelve el modelo Gemini a utilizar con estricta prioridad en runtime:
     1. parámetro explícito model_name, si existe y no está vacío
-    2. os.getenv("GEMINI_MODEL"), si está definido y no está vacío
-    3. GeminiSemanticJudge.DEFAULT_MODEL como fallback
+    2. variable de entorno GEMINI_MODEL, si está definida y no está vacía
+    3. st.secrets si se ejecuta en Streamlit Community Cloud
+    4. GeminiSemanticJudge.DEFAULT_MODEL como fallback
     """
     if model_name is not None and str(model_name).strip():
         return str(model_name).strip()
@@ -97,6 +125,16 @@ def resolve_gemini_model(model_name: Optional[str] = None) -> str:
     env_model = os.getenv("GEMINI_MODEL")
     if env_model is not None and env_model.strip():
         return env_model.strip()
+
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            if "GEMINI_MODEL" in st.secrets and st.secrets["GEMINI_MODEL"]:
+                return str(st.secrets["GEMINI_MODEL"]).strip()
+            if "gemini" in st.secrets and "model" in st.secrets["gemini"]:
+                return str(st.secrets["gemini"]["model"]).strip()
+    except Exception:
+        pass
 
     return GeminiSemanticJudge.DEFAULT_MODEL
 
@@ -115,11 +153,11 @@ class GeminiSemanticJudge(SemanticJudge):
         model_name: Optional[str] = None,
         client: Optional[object] = None,
     ):
-        resolved_key = api_key or os.getenv("GEMINI_API_KEY")
+        resolved_key = resolve_gemini_api_key(api_key)
         if not resolved_key:
             raise SemanticJudgeConfigError(
                 "Variable de entorno GEMINI_API_KEY no configurada. "
-                "Definí GEMINI_API_KEY en tu entorno para usar el evaluador semántico."
+                "Definí GEMINI_API_KEY en tu entorno o en los secrets de Streamlit para usar el evaluador semántico."
             )
         self.api_key = resolved_key
         self.model_name = resolve_gemini_model(model_name)

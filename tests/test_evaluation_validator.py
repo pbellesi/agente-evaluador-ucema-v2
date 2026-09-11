@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 from datetime import datetime
 from src.semantic_schema import SemanticJudgePayload
 from src.evaluation_validator import validate_and_score_evaluation

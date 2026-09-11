@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 from src.context_builder import build_evidence_packet
 
 

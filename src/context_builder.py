@@ -1,4 +1,4 @@
-﻿from typing import Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 def _truncate_content(content: str, max_chars: int) -> str:

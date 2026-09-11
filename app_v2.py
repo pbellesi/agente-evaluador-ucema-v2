@@ -28,12 +28,13 @@ from src.batch_evaluator import (
 from src.semantic_judge import (
     GeminiSemanticJudge,
     SemanticJudgeConfigError,
+    resolve_gemini_api_key,
     resolve_gemini_model,
 )
 
 
 def get_api_key() -> str | None:
-    return os.getenv("GEMINI_API_KEY")
+    return resolve_gemini_api_key()
 
 
 def get_model_name() -> str:
@@ -58,7 +59,7 @@ def render_app():
             "Modelo configurado",
             value=model_name,
             disabled=True,
-            help="Modelo utilizado por el Juez Semántico V2 (definido por GEMINI_MODEL o default del sistema).",
+            help="Modelo utilizado por el Juez Semántico V2 (definido por GEMINI_MODEL, st.secrets o default del sistema).",
         )
 
         api_key = get_api_key()
@@ -66,7 +67,7 @@ def render_app():
             st.success("GEMINI_API_KEY: Configurada")
         else:
             st.error("GEMINI_API_KEY: No detectada")
-            st.warning("Defina GEMINI_API_KEY como variable de entorno o en el archivo .env en la raíz del proyecto.")
+            st.warning("Defina GEMINI_API_KEY en variables de entorno, archivo .env o en st.secrets de Streamlit Cloud.")
 
         st.markdown("---")
         st.markdown(
@@ -81,7 +82,7 @@ def render_app():
     if not api_key:
         st.error(
             "⚠️ No se encontró la variable GEMINI_API_KEY. "
-            "Por favor, configure GEMINI_API_KEY en las variables de entorno o en el archivo `.env` para poder ejecutar las evaluaciones."
+            "Por favor, configure GEMINI_API_KEY en las variables de entorno, en el archivo `.env` o en los Secrets de Streamlit Community Cloud para poder ejecutar las evaluaciones."
         )
 
     # 1. Carga de Archivos

@@ -10,6 +10,7 @@ from src.semantic_judge import (
     GeminiSemanticJudge,
     SemanticJudgeConfigError,
     SemanticJudgeEvaluationError,
+    resolve_gemini_api_key,
     resolve_gemini_model,
 )
 
@@ -51,6 +52,19 @@ class TestSemanticJudge(unittest.TestCase):
         result = judge.evaluate(self.sample_evidence_packet)
         self.assertEqual(result.project_understanding.system_summary, "Sistema de triage médico.")
         self.assertEqual(judge.last_evidence_packet, self.sample_evidence_packet)
+
+    def test_resolve_gemini_api_key_priority(self):
+        # 1. Parámetro explícito
+        self.assertEqual(resolve_gemini_api_key("custom_key"), "custom_key")
+
+        # 2. Variable de entorno
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "env_key_123"}, clear=True):
+            self.assertEqual(resolve_gemini_api_key(), "env_key_123")
+            self.assertEqual(resolve_gemini_api_key("override_key"), "override_key")
+
+        # 3. Sin clave
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(resolve_gemini_api_key())
 
     def test_gemini_judge_missing_api_key_raises_config_error(self):
         with patch.dict(os.environ, {}, clear=True):

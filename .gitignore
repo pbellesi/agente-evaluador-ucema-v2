@@ -38,3 +38,8 @@ build/
 .streamlit/secrets.toml
 *.patch
 
+# Datos locales de pruebas y benchmarks
+*.zip
+*.jsonl
+evaluaciones_locales/
+benchmarks_locales/
