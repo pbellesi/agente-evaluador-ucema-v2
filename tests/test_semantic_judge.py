@@ -1,4 +1,4 @@
-﻿import os
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 from pydantic import ValidationError
@@ -61,7 +61,7 @@ class TestSemanticJudge(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123"}, clear=True):
             with patch("google.genai.Client"):
                 judge_default = GeminiSemanticJudge()
-                self.assertEqual(judge_default.model_name, "gemini-3.7-flash")
+                self.assertEqual(judge_default.model_name, "gemini-3.8-flash")
 
         with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123", "GEMINI_MODEL": "gemini-2.5-pro"}, clear=True):
             with patch("google.genai.Client"):
@@ -80,7 +80,7 @@ class TestSemanticJudge(unittest.TestCase):
         self.assertEqual(result, self.sample_payload)
         mock_client.models.generate_content.assert_called_once()
         _, kwargs = mock_client.models.generate_content.call_args
-        self.assertEqual(kwargs["model"], "gemini-3.7-flash")
+        self.assertEqual(kwargs["model"], "gemini-3.8-flash")
         config = kwargs["config"]
         self.assertEqual(config.response_schema, SemanticJudgePayload)
         self.assertEqual(config.temperature, 0.2)

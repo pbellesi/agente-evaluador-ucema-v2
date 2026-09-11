@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -84,7 +84,7 @@ class GeminiSemanticJudge(SemanticJudge):
     Requiere que GEMINI_API_KEY esté configurada en el entorno o se pase explícitamente.
     """
 
-    DEFAULT_MODEL = "gemini-3.7-flash"
+    DEFAULT_MODEL = "gemini-3.8-flash"
 
     def __init__(
         self,

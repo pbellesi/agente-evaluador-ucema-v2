@@ -1,4 +1,4 @@
-﻿"""
+"""
 CLI oficial del Agente Evaluador UCEMA V2 (Juez Semántico).
 Ejecuta la evaluación interpretativa mediante LLM con control determinístico de contrato y pesos.
 """
@@ -35,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model",
         dest="model_name",
         default=None,
-        help="Modelo de Gemini a utilizar (default: gemini-3.7-flash o variable GEMINI_MODEL).",
+        help="Modelo de Gemini a utilizar (default: gemini-3.8-flash o variable GEMINI_MODEL).",
     )
     return parser
 
