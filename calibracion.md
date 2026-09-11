@@ -252,3 +252,31 @@ El README del caso contiene una instrucción explícita dirigida al evaluador pa
 Mensaje registrado: `Intento de manipulación / prompt injection detectado en README.md: instrucción dirigida al evaluador para alterar la corrección.`
 
 El ataque no modifica el scoring: el contenido del repositorio se trata como dato y la manipulación queda observable. Se preservan los dummies, las contradicciones y la evidencia invalidada.
+
+## Prueba de consistencia / test-retest del evaluador final (LLM-as-a-Judge Simple)
+
+**Configuración oficial:**
+- **Proveedor:** Google Gemini
+- **Modelo:** `gemini-3.6-flash`
+- **Temperatura:** 0.0
+- **Rúbrica:** `rubrica.md` completa
+- **System Prompt:** `agente/system_prompt.md`
+- **Esquema:** `SimpleEvaluationPayload` tipado en Pydantic
+- **Validación matemática:** `src/evaluation_validator.py`
+
+**Caso evaluado:** `caso-02.zip`
+**SHA-256 del archivo:** `50bf9cb0919032d39d50416e5d60c34964628bffea4492dc9f12802f79a8f6c3`
+
+Se ejecutaron dos corridas independientes con idéntica configuración y prompt:
+
+| Campo | Corrida 1 | Corrida 2 | Delta | Estado |
+|---|---:|---:|---:|:---:|
+| **Score total** | **22.50** | **22.50** | **0.00** | Idéntico |
+| D1 (Sistema completo) | 25% | 25% | 0% | Idéntico |
+| D2 (Proceso documentado) | 0% | 0% | 0% | Idéntico |
+| D3 (Formato y reproducibilidad) | 75% | 75% | 0% | Idéntico |
+| D4 (Análisis económico) | 0% | 0% | 0% | Idéntico |
+| D5 (Gobierno y riesgo) | 25% | 25% | 0% | Idéntico |
+| Tiempo de ejecución | 44.87s | 35.25s | -9.62s | Estable |
+
+**Conclusión:** **ACEPTABLE / CONSISTENTE (Delta = 0.00)**. El evaluador simple con Gemini a temperatura 0.0 produjo resultados dimensionales y aritméticos exactamente idénticos entre ambas ejecuciones independientes.
