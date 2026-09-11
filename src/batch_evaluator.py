@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Callable, List, Literal, Optional, Sequence, Tuple
 
 from src.context_builder import build_evidence_packet
+from src.deterministic_evaluator import evaluate_repository_deterministically
 from src.evaluation_validator import validate_and_score_evaluation
+from src.evaluator_engine import EVALUATOR_VERSION
 from src.schema import EvaluationResult
 from src.semantic_judge import GeminiSemanticJudge, SemanticJudge
 from src.semantic_schema import SemanticJudgePayload
@@ -38,12 +40,17 @@ def load_rubric_text(rubric_path: Optional[Path] = None) -> Optional[str]:
 def evaluate_project_zip(
     zip_bytes: bytes,
     filename: str,
-    judge: SemanticJudge,
+    judge: Optional[SemanticJudge] = None,
     rubric_text: Optional[str] = None,
 ) -> ProjectEvaluationOutcome:
     """
     Evalúa un único archivo ZIP en memoria de forma aislada.
-    Nunca propaga excepciones: encapsula errores en ProjectEvaluationOutcome con status='ERROR'.
+    REGLA DE ORO DE DETERMINISMO V2:
+    - La autoridad de scoring es 100% el motor determinístico en Python (evaluate_repository_deterministically).
+    - Si judge está presente, ejecuta análisis interpretativo (findings, sugerencia, integridad).
+    - Si judge falla (429 cuota diaria, 503, timeout, etc.), la evaluación NO falla ni da 0:
+      retorna el resultado determinístico con status 'OK' y aviso informativo.
+    - Si el ZIP está físicamente dañado, retorna status 'ERROR' con el mensaje de error.
     """
     try:
         if rubric_text is None:
@@ -52,21 +59,43 @@ def evaluate_project_zip(
         # 1. Ingesta segura en memoria
         repo_data = build_repository_data_from_zip(zip_bytes, filename)
 
-        # 2. Construcción de Contexto
+        # 2. Evaluación determinística autorizada (inmutable)
+        det_result = evaluate_repository_deterministically(repo_data)
+
+        # 3. Si no se especificó juez semántico, retornar inmediatamente
+        if judge is None:
+            return ProjectEvaluationOutcome(
+                project_name=filename,
+                status="OK",
+                result=det_result,
+                payload=None,
+            )
+
+        # 4. Construcción de Contexto
         evidence_packet = build_evidence_packet(repo_data, rubric_text=rubric_text)
 
-        # 3. Juez Semántico
-        payload = judge.evaluate(evidence_packet)
-
-        # 4. Validación determinística y scoring matemático
-        result = validate_and_score_evaluation(payload, repo_data)
-
-        return ProjectEvaluationOutcome(
-            project_name=filename,
-            status="OK",
-            result=result,
-            payload=payload,
-        )
+        # 5. Juez Semántico encapsulado (tolerante a fallos de cuota o red)
+        try:
+            payload = judge.evaluate(evidence_packet)
+            result = validate_and_score_evaluation(payload, repo_data)
+            return ProjectEvaluationOutcome(
+                project_name=filename,
+                status="OK",
+                result=result,
+                payload=payload,
+            )
+        except Exception as llm_error:
+            res_fallback = det_result.model_copy(deep=True)
+            res_fallback.integrity_notes.append(
+                f"[LLM_UNAVAILABLE] Análisis semántico no disponible: {llm_error}. Calificación calculada 100% determinísticamente."
+            )
+            return ProjectEvaluationOutcome(
+                project_name=filename,
+                status="OK",
+                result=res_fallback,
+                payload=None,
+                error_message=f"Aviso semántico: {llm_error}",
+            )
     except Exception as exc:
         return ProjectEvaluationOutcome(
             project_name=filename,

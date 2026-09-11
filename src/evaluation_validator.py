@@ -16,20 +16,127 @@ OFFICIAL_DIMENSIONS = [
 ALLOWED_LEVELS = {0, 25, 50, 75, 100}
 
 
-def validate_and_score_evaluation(
+def merge_deterministic_and_semantic(
+    det_result: EvaluationResult,
     payload: Union[SemanticJudgePayload, dict],
     repo_data: dict,
 ) -> EvaluationResult:
     """
-    Valida el payload del Juez Semántico y calcula determinísticamente los puntajes.
-    Responsabilidades estrictas:
-    - Exige niveles estrictamente en {0, 25, 50, 75, 100} (PROHIBIDO el clamping silencioso).
-    - Exige las 5 dimensiones oficiales (D1 a D5).
-    - Aplica los pesos matemáticos oficiales: 30%, 25%, 15%, 15%, 15%.
-    - Verifica citas de archivos contra el inventario del repositorio.
-    - Transporta hallazgos de integridad a integrity_notes.
-    - NO reinterpreta la evaluación semántica ni modifica justificaciones.
+    Combina el resultado determinístico con el análisis interpretativo del Juez Semántico.
+    REGLA DE ORO DE DETERMINISMO:
+    - Las dimensiones D1..D5, sus niveles (0/25/50/75/100), sus pesos oficiales y el final_score
+      son ESTRICTAMENTE los calculados por el motor determinístico (det_result).
+    - El payload semántico enriquece la explicación pedagógica:
+      - Audita citas de archivos en los hallazgos contra el inventario real.
+      - Agrega hallazgos de integridad a integrity_notes.
+      - Incorpora la sugerencia concreta de mejora pedagógica.
     """
+    if isinstance(payload, dict):
+        try:
+            payload = SemanticJudgePayload.model_validate(payload)
+        except ValidationError as error:
+            raise ValueError(f"Payload de evaluación semántica no cumple el esquema formal: {error}") from error
+    elif not isinstance(payload, SemanticJudgePayload):
+        raise ValueError(f"Tipo de payload no soportado: {type(payload)}")
+
+    inventory_paths = {
+        item.get("path") for item in repo_data.get("repository_inventory", []) if item.get("path")
+    }
+    if not inventory_paths and "file_contents" in repo_data:
+        inventory_paths = set(repo_data["file_contents"].keys())
+
+    integrity_notes = list(det_result.integrity_notes or [])
+    category_findings: Dict[str, List[str]] = {
+        "implementation": [],
+        "process": [],
+        "reproducibility": [],
+        "economics": [],
+        "governance": [],
+    }
+
+    for item in payload.findings:
+        if isinstance(item, dict):
+            item = FindingItem.model_validate(item)
+
+        if item.category == "integrity":
+            files_str = f" (Archivos: {', '.join(item.files)})" if item.files else ""
+            note = f"[INTEGRIDAD_{item.severity.upper()}] {item.finding}{files_str}"
+            if note not in integrity_notes:
+                integrity_notes.append(note)
+        elif item.category in category_findings:
+            category_findings[item.category].append(item.finding)
+
+        for path in item.files:
+            if inventory_paths and path not in inventory_paths:
+                unverified_note = (
+                    f"[CITA_NO_VERIFICADA] El archivo '{path}' citado en hallazgos no figura en el inventario del repositorio."
+                )
+                if unverified_note not in integrity_notes:
+                    integrity_notes.append(unverified_note)
+
+    # Conservar dimensiones determinísticas autorizadas
+    merged_dimensions: List[DimensionResult] = []
+    cat_map = {
+        "Sistema completo y funcionando": "implementation",
+        "Proceso documentado": "process",
+        "Formato y reproducibilidad": "reproducibility",
+        "Análisis económico": "economics",
+        "Gobierno y riesgo": "governance",
+    }
+
+    for dim in det_result.dimensions:
+        merged_evidence = list(dim.evidence)
+        cat = cat_map.get(dim.dimension)
+        if cat and cat in category_findings:
+            for f in category_findings[cat]:
+                if f not in merged_evidence:
+                    merged_evidence.append(f)
+
+        merged_dimensions.append(
+            DimensionResult(
+                dimension=dim.dimension,
+                weight=dim.weight,
+                level_percent=dim.level_percent,
+                score=dim.score,
+                evidence=merged_evidence,
+                justification=dim.justification,
+                missing_for_next_level=dim.missing_for_next_level,
+            )
+        )
+
+    concrete_improvement = (
+        payload.concrete_improvement.strip()
+        if payload.concrete_improvement and payload.concrete_improvement.strip()
+        else det_result.concrete_improvement
+    )
+
+    return EvaluationResult(
+        repository=det_result.repository,
+        evaluated_revision=det_result.evaluated_revision,
+        evaluation_date=det_result.evaluation_date,
+        evaluation_status=det_result.evaluation_status,
+        dimensions=merged_dimensions,
+        final_score=det_result.final_score,
+        concrete_improvement=concrete_improvement,
+        integrity_notes=integrity_notes,
+    )
+
+
+def validate_and_score_evaluation(
+    payload: Union[SemanticJudgePayload, dict],
+    repo_data: dict,
+    authoritative_mode: str = "deterministic",
+) -> EvaluationResult:
+    """
+    Valida el payload del Juez Semántico y calcula los puntajes.
+    Si authoritative_mode == 'deterministic' y repo_data contiene 'file_contents',
+    delega el scoring al motor determinístico inmutable y enriquece con el análisis semántico.
+    Si no, ejecuta la validación y cálculo determinístico sobre el payload.
+    """
+    if authoritative_mode == "deterministic" and repo_data.get("file_contents"):
+        from src.deterministic_evaluator import evaluate_repository_deterministically
+        det_result = evaluate_repository_deterministically(repo_data)
+        return merge_deterministic_and_semantic(det_result, payload, repo_data)
     if isinstance(payload, dict):
         try:
             payload = SemanticJudgePayload.model_validate(payload)

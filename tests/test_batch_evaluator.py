@@ -21,6 +21,7 @@ from src.semantic_schema import (
 def _create_sample_zip() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("src/main.py", "import os\nprint('agente')\n")
         zf.writestr("README.md", "# Test Project\nSistema agéntico de prueba.")
         zf.writestr("prompts/system_prompt.md", "Sos un agente de reposición.")
         zf.writestr("DECISIONES.md", "Bitácora de decisiones v1 a v2.")
@@ -73,7 +74,7 @@ def test_evaluate_project_zip_success():
     assert outcome.payload is not None
     assert outcome.error_message is None
     assert outcome.result.final_score is not None
-    assert outcome.result.dimensions[0].level_percent == 100
+    assert outcome.result.dimensions[0].level_percent == 50
 
 
 def test_evaluate_project_zip_invalid_bytes():
@@ -92,9 +93,11 @@ def test_evaluate_project_zip_judge_failure():
     judge = FailingMockJudge()
     outcome = evaluate_project_zip(zip_bytes, "fallo_judge.zip", judge)
 
-    assert outcome.status == "ERROR"
+    assert outcome.status == "OK"
     assert outcome.project_name == "fallo_judge.zip"
-    assert outcome.result is None
+    assert outcome.result is not None
+    assert outcome.result.final_score is not None
+    assert outcome.payload is None
     assert "Falla simulada" in outcome.error_message
 
 

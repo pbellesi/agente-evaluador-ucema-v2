@@ -26,6 +26,7 @@ from src.batch_evaluator import (
     evaluate_project_zip,
     load_rubric_text,
 )
+from src.evaluator_engine import EVALUATOR_VERSION
 from src.semantic_judge import (
     SemanticJudgeConfigError,
     create_semantic_judge,
@@ -84,18 +85,19 @@ def render_app():
 
         st.markdown("---")
         st.markdown(
-            "**Pipeline V2:**\n"
+            "**Pipeline V2 (Scoring Determinístico + Análisis LLM):**\n"
             "1. Ingesta segura de ZIP en memoria\n"
-            "2. ContextBuilder (inventario y contexto)\n"
-            f"3. SemanticJudge ({provider.upper()}) (análisis interpretativo)\n"
-            "4. EvaluationValidator (verificación y scoring matemático)"
+            "2. Scoring determinístico oficial (matriz de gates en Python)\n"
+            "3. ContextBuilder (inventario y contexto optimizado)\n"
+            f"4. SemanticJudge ({provider.upper()}) (análisis interpretativo)\n"
+            "5. Fusión y verificación de integridad"
         )
 
     # Verificación de API Key antes de permitir evaluar
     if not api_key:
-        st.error(
-            f"⚠️ No se encontró la variable {key_name}. "
-            f"Por favor, configure {key_name} en las variables de entorno, en el archivo `.env` o en los Secrets de Streamlit Community Cloud para poder ejecutar las evaluaciones."
+        st.info(
+            f"ℹ️ {key_name} no detectada. Las evaluaciones se realizarán en modo 100% determinístico Zero-API "
+            "(las calificaciones D1-D5 y la nota final oficiales se calculan directamente mediante la matriz de gates de rubrica.md)."
         )
 
     # 1. Carga de Archivos
@@ -115,18 +117,20 @@ def render_app():
     start_eval = st.button(
         "EVALUAR PROYECTOS",
         type="primary",
-        disabled=(not uploaded_files) or (not api_key),
+        disabled=(not uploaded_files),
     )
 
     if "outcomes" not in st.session_state:
         st.session_state["outcomes"] = []
 
-    if start_eval and uploaded_files and api_key:
-        try:
-            judge = create_semantic_judge(provider=provider, model_name=model_name)
-        except SemanticJudgeConfigError as err:
-            st.error(f"Error de configuración: {err}")
-            return
+    if start_eval and uploaded_files:
+        judge = None
+        if api_key:
+            try:
+                judge = create_semantic_judge(provider=provider, model_name=model_name)
+            except SemanticJudgeConfigError as err:
+                st.warning(f"Error al inicializar LLM ({err}). Procediendo en modo determinístico.")
+                judge = None
 
         rubric_text = load_rubric_text()
         total_files = len(uploaded_files)
@@ -140,10 +144,11 @@ def render_app():
         for idx, uploaded_file in enumerate(uploaded_files):
             zip_bytes = uploaded_file.getvalue()
             zip_sha256 = hashlib.sha256(zip_bytes).hexdigest()
+            cache_key = f"{EVALUATOR_VERSION}:{zip_sha256}"
 
-            if zip_sha256 in st.session_state["evaluation_cache"]:
+            if cache_key in st.session_state["evaluation_cache"]:
                 status_box.info(f"⚡ Recuperando de caché (0 llamadas LLM): **{uploaded_file.name}** ({idx + 1}/{total_files})...")
-                outcome = st.session_state["evaluation_cache"][zip_sha256]
+                outcome = st.session_state["evaluation_cache"][cache_key]
             else:
                 status_box.info(f"⏳ Evaluando **{uploaded_file.name}** ({idx + 1}/{total_files})...")
                 outcome = evaluate_project_zip(
@@ -153,7 +158,7 @@ def render_app():
                     rubric_text=rubric_text,
                 )
                 if outcome.status == "OK":
-                    st.session_state["evaluation_cache"][zip_sha256] = outcome
+                    st.session_state["evaluation_cache"][cache_key] = outcome
 
             outcomes.append(outcome)
             progress_bar.progress((idx + 1) / total_files)

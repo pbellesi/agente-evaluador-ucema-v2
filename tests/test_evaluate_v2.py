@@ -73,7 +73,8 @@ class TestEvaluateV2CLI(unittest.TestCase):
         output_json = json.loads(stdout.getvalue())
         self.assertEqual(output_json["evaluation_status"], "completed")
         self.assertEqual(len(output_json["dimensions"]), 5)
-        self.assertAlmostEqual(output_json["final_score"], 61.25, places=2)
+        # La nota final es 100% la calculada determinísticamente (7.5 para este zip mínimo)
+        self.assertAlmostEqual(output_json["final_score"], 7.5, places=2)
 
     def test_successful_evaluation_with_mock_nvidia_judge(self):
         mock_judge = MagicMock()
@@ -90,7 +91,8 @@ class TestEvaluateV2CLI(unittest.TestCase):
         output_json = json.loads(stdout.getvalue())
         self.assertEqual(output_json["evaluation_status"], "completed")
         self.assertEqual(len(output_json["dimensions"]), 5)
-        self.assertAlmostEqual(output_json["final_score"], 61.25, places=2)
+        # La nota final es 100% la calculada determinísticamente (7.5 para este zip mínimo)
+        self.assertAlmostEqual(output_json["final_score"], 7.5, places=2)
 
 
 

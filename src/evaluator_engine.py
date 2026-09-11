@@ -9,6 +9,7 @@ from src.github_fetcher import GitHubRequestError, fetch_repository_data
 from src.zip_repository import ZipRepositoryError, build_repository_data_from_zip
 
 
+EVALUATOR_VERSION = "v2-deterministic-score-1"
 PRIMARY_RATE_LIMIT_MARKER = "[GITHUB_PRIMARY_RATE_LIMIT]"
 
 
