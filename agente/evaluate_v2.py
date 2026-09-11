@@ -24,6 +24,8 @@ from src.semantic_judge import (
     GeminiSemanticJudge,
     SemanticJudgeConfigError,
     SemanticJudgeEvaluationError,
+    create_semantic_judge,
+    resolve_llm_provider,
 )
 from src.zip_repository import ZipRepositoryError, build_repository_data_from_zip
 
@@ -36,12 +38,20 @@ def _build_parser() -> argparse.ArgumentParser:
     source.add_argument("--github", metavar="URL", help="URL pública del repositorio objetivo en GitHub.")
     source.add_argument("--zip", dest="zip_path", metavar="PATH", help="Ruta del archivo ZIP del proyecto.")
     parser.add_argument(
+        "--provider",
+        dest="provider",
+        choices=["gemini", "nvidia"],
+        default=None,
+        help="Proveedor LLM a utilizar ('gemini' o 'nvidia', default: variable LLM_PROVIDER o gemini).",
+    )
+    parser.add_argument(
         "--model",
         dest="model_name",
         default=None,
-        help="Modelo de Gemini a utilizar (default: gemini-3.8-flash o variable GEMINI_MODEL).",
+        help="Modelo a utilizar (default según el proveedor configurado).",
     )
     return parser
+
 
 
 def _load_rubric_text() -> Optional[str]:
@@ -58,12 +68,13 @@ def run_evaluation_v2(
     zip_path: Optional[str] = None,
     github_url: Optional[str] = None,
     model_name: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> EvaluationResult:
     """
     Ejecuta el pipeline completo V2:
     1. Ingesta segura existente (ZIP o GitHub)
     2. ContextBuilder (organización y delimitación de contexto)
-    3. GeminiSemanticJudge (análisis interpretativo estructurado)
+    3. SemanticJudge (análisis interpretativo estructurado via Gemini o NVIDIA)
     4. EvaluationValidator (verificación de citas, niveles estrictos y pesos oficiales)
     """
     # 1. Ingesta segura
@@ -83,7 +94,12 @@ def run_evaluation_v2(
     evidence_packet = build_evidence_packet(repo_data, rubric_text=rubric_text)
 
     # 3. Juez Semántico
-    judge = GeminiSemanticJudge(model_name=model_name)
+    eff_provider = resolve_llm_provider(provider)
+    if eff_provider == "gemini":
+        judge = GeminiSemanticJudge(model_name=model_name)
+    else:
+        judge = create_semantic_judge(provider=eff_provider, model_name=model_name)
+
     payload = judge.evaluate(evidence_packet)
 
     # 4. Validación determinística y scoring matemático
@@ -102,6 +118,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             zip_path=args.zip_path,
             github_url=args.github,
             model_name=args.model_name,
+            provider=args.provider,
         )
     except SemanticJudgeConfigError as error:
         sys.stderr.write(f"[CONFIG_ERROR] {error}\n")
@@ -118,6 +135,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     sys.stdout.write(result.model_dump_json(indent=2) + "\n")
     return 0
+
 
 
 if __name__ == "__main__":

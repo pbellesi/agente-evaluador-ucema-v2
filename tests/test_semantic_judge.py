@@ -8,10 +8,15 @@ from src.semantic_judge import (
     SemanticJudge,
     MockSemanticJudge,
     GeminiSemanticJudge,
+    NvidiaSemanticJudge,
     SemanticJudgeConfigError,
     SemanticJudgeEvaluationError,
+    create_semantic_judge,
     resolve_gemini_api_key,
     resolve_gemini_model,
+    resolve_llm_provider,
+    resolve_nvidia_api_key,
+    resolve_nvidia_model,
 )
 
 
@@ -156,6 +161,121 @@ class TestSemanticJudge(unittest.TestCase):
             judge.evaluate(self.sample_evidence_packet)
 
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    def test_resolve_llm_provider_priority(self):
+        # 1. Parámetro explícito
+        self.assertEqual(resolve_llm_provider("nvidia"), "nvidia")
+        self.assertEqual(resolve_llm_provider("gemini"), "gemini")
+
+        # 2. Variable de entorno
+        with patch.dict(os.environ, {"LLM_PROVIDER": "nvidia"}, clear=True):
+            self.assertEqual(resolve_llm_provider(), "nvidia")
+            self.assertEqual(resolve_llm_provider("gemini"), "gemini")
+
+        # 3. Fallback default
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(resolve_llm_provider(), "gemini")
+
+    def test_resolve_nvidia_api_key_priority(self):
+        # 1. Parámetro explícito
+        self.assertEqual(resolve_nvidia_api_key("custom_nv_key"), "custom_nv_key")
+
+        # 2. Variable de entorno
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "env_nv_key"}, clear=True):
+            self.assertEqual(resolve_nvidia_api_key(), "env_nv_key")
+
+        # 3. Sin clave
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(resolve_nvidia_api_key())
+
+    def test_resolve_nvidia_model_priority(self):
+        # 1. Sin variable -> default
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(resolve_nvidia_model(), NvidiaSemanticJudge.DEFAULT_MODEL)
+
+        # 2. Variable de entorno
+        with patch.dict(os.environ, {"NVIDIA_MODEL": "custom-nv-model"}, clear=True):
+            self.assertEqual(resolve_nvidia_model(), "custom-nv-model")
+
+        # 3. Parámetro explícito
+        with patch.dict(os.environ, {"NVIDIA_MODEL": "custom-nv-model"}, clear=True):
+            self.assertEqual(resolve_nvidia_model("explicit-nv-model"), "explicit-nv-model")
+
+    def test_nvidia_judge_missing_api_key_raises_config_error(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SemanticJudgeConfigError) as ctx:
+                NvidiaSemanticJudge(api_key=None)
+            self.assertIn("NVIDIA_API_KEY", str(ctx.exception))
+
+    def test_nvidia_judge_success_with_mock_client(self):
+        mock_client = MagicMock()
+        mock_completion = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = self.sample_payload.model_dump_json()
+        mock_completion.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_completion
+
+        judge = NvidiaSemanticJudge(api_key="fake_nv_key", client=mock_client)
+        result = judge.evaluate(self.sample_evidence_packet)
+
+        self.assertEqual(result, self.sample_payload)
+        mock_client.chat.completions.create.assert_called_once()
+        _, kwargs = mock_client.chat.completions.create.call_args
+        self.assertEqual(kwargs["model"], judge.model_name)
+        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
+        self.assertEqual(kwargs["reasoning_effort"], "low")
+
+    def test_nvidia_judge_cleans_markdown_fences(self):
+        mock_client = MagicMock()
+        mock_completion = MagicMock()
+        mock_choice = MagicMock()
+        # Modelo devuelve json envuelto en markdown code fences
+        mock_choice.message.content = f"```json\n{self.sample_payload.model_dump_json()}\n```"
+        mock_completion.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_completion
+
+        judge = NvidiaSemanticJudge(api_key="fake_nv_key", client=mock_client)
+        result = judge.evaluate(self.sample_evidence_packet)
+        self.assertEqual(result, self.sample_payload)
+
+    def test_nvidia_judge_retries_once_on_invalid_json(self):
+        mock_client = MagicMock()
+        mock_bad = MagicMock()
+        mock_bad.choices = [MagicMock()]
+        mock_bad.choices[0].message.content = "{not valid json}"
+
+        mock_good = MagicMock()
+        mock_good.choices = [MagicMock()]
+        mock_good.choices[0].message.content = self.sample_payload.model_dump_json()
+
+        mock_client.chat.completions.create.side_effect = [mock_bad, mock_good]
+
+        judge = NvidiaSemanticJudge(api_key="fake_nv_key", client=mock_client)
+        result = judge.evaluate(self.sample_evidence_packet)
+        self.assertEqual(result, self.sample_payload)
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+
+    def test_nvidia_judge_rate_limit_error_message(self):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("HTTP 429 Too Many Requests: Rate limit exceeded")
+
+        judge = NvidiaSemanticJudge(api_key="fake_nv_key", client=mock_client)
+        with patch("time.sleep"):  # Evitar demora real en test
+            with self.assertRaises(SemanticJudgeEvaluationError) as ctx:
+                judge.evaluate(self.sample_evidence_packet)
+            self.assertIn("[RATE_LIMIT_429]", str(ctx.exception))
+
+    def test_create_semantic_judge_factory(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_gemini", "NVIDIA_API_KEY": "fake_nv"}, clear=True):
+            with patch("google.genai.Client"), patch("openai.OpenAI"):
+                judge_gemini = create_semantic_judge("gemini")
+                self.assertIsInstance(judge_gemini, GeminiSemanticJudge)
+
+                judge_nvidia = create_semantic_judge("nvidia")
+                self.assertIsInstance(judge_nvidia, NvidiaSemanticJudge)
+
+                with self.assertRaises(SemanticJudgeConfigError):
+                    create_semantic_judge("unsupported_provider")
 
 
 if __name__ == "__main__":

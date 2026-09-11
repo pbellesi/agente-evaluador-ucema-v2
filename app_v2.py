@@ -26,19 +26,24 @@ from src.batch_evaluator import (
     load_rubric_text,
 )
 from src.semantic_judge import (
-    GeminiSemanticJudge,
     SemanticJudgeConfigError,
+    create_semantic_judge,
     resolve_gemini_api_key,
     resolve_gemini_model,
+    resolve_llm_provider,
+    resolve_nvidia_api_key,
+    resolve_nvidia_model,
 )
 
 
-def get_api_key() -> str | None:
-    return resolve_gemini_api_key()
+def get_active_provider() -> str:
+    return resolve_llm_provider()
 
 
-def get_model_name() -> str:
-    return resolve_gemini_model()
+def get_provider_details(provider: str) -> tuple[str | None, str, str]:
+    if provider == "nvidia":
+        return resolve_nvidia_api_key(), resolve_nvidia_model(), "NVIDIA_API_KEY"
+    return resolve_gemini_api_key(), resolve_gemini_model(), "GEMINI_API_KEY"
 
 
 def render_app():
@@ -51,38 +56,45 @@ def render_app():
     st.title("Agente Evaluador UCEMA V2")
     st.caption("Evaluación semántica de repositorios mediante LLM y runtime determinístico.")
 
+    provider = get_active_provider()
+    api_key, model_name, key_name = get_provider_details(provider)
+
     # Sidebar: Configuración e Información
     with st.sidebar:
         st.header("Configuración")
-        model_name = get_model_name()
+        st.text_input(
+            "Proveedor LLM",
+            value=provider.upper(),
+            disabled=True,
+            help="Proveedor configurado en LLM_PROVIDER (gemini o nvidia).",
+        )
         st.text_input(
             "Modelo configurado",
             value=model_name,
             disabled=True,
-            help="Modelo utilizado por el Juez Semántico V2 (definido por GEMINI_MODEL, st.secrets o default del sistema).",
+            help=f"Modelo utilizado por el Juez Semántico V2 ({key_name.split('_')[0]}_MODEL o default del sistema).",
         )
 
-        api_key = get_api_key()
         if api_key:
-            st.success("GEMINI_API_KEY: Configurada")
+            st.success(f"{key_name}: Configurada")
         else:
-            st.error("GEMINI_API_KEY: No detectada")
-            st.warning("Defina GEMINI_API_KEY en variables de entorno, archivo .env o en st.secrets de Streamlit Cloud.")
+            st.error(f"{key_name}: No detectada")
+            st.warning(f"Defina {key_name} en variables de entorno, archivo .env o en st.secrets de Streamlit Cloud.")
 
         st.markdown("---")
         st.markdown(
             "**Pipeline V2:**\n"
             "1. Ingesta segura de ZIP en memoria\n"
             "2. ContextBuilder (inventario y contexto)\n"
-            "3. GeminiSemanticJudge (análisis interpretativo)\n"
+            f"3. SemanticJudge ({provider.upper()}) (análisis interpretativo)\n"
             "4. EvaluationValidator (verificación y scoring matemático)"
         )
 
     # Verificación de API Key antes de permitir evaluar
     if not api_key:
         st.error(
-            "⚠️ No se encontró la variable GEMINI_API_KEY. "
-            "Por favor, configure GEMINI_API_KEY en las variables de entorno, en el archivo `.env` o en los Secrets de Streamlit Community Cloud para poder ejecutar las evaluaciones."
+            f"⚠️ No se encontró la variable {key_name}. "
+            f"Por favor, configure {key_name} en las variables de entorno, en el archivo `.env` o en los Secrets de Streamlit Community Cloud para poder ejecutar las evaluaciones."
         )
 
     # 1. Carga de Archivos
@@ -110,7 +122,7 @@ def render_app():
 
     if start_eval and uploaded_files and api_key:
         try:
-            judge = GeminiSemanticJudge(model_name=model_name)
+            judge = create_semantic_judge(provider=provider, model_name=model_name)
         except SemanticJudgeConfigError as err:
             st.error(f"Error de configuración: {err}")
             return

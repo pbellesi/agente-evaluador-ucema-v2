@@ -64,7 +64,7 @@ class TestEvaluateV2CLI(unittest.TestCase):
 
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key"}):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key", "LLM_PROVIDER": "gemini"}):
             with patch("agente.evaluate_v2.GeminiSemanticJudge", return_value=mock_judge):
                 with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
                     exit_code = evaluate_v2.main(["--zip", self.temp_zip.name])
@@ -74,6 +74,24 @@ class TestEvaluateV2CLI(unittest.TestCase):
         self.assertEqual(output_json["evaluation_status"], "completed")
         self.assertEqual(len(output_json["dimensions"]), 5)
         self.assertAlmostEqual(output_json["final_score"], 61.25, places=2)
+
+    def test_successful_evaluation_with_mock_nvidia_judge(self):
+        mock_judge = MagicMock()
+        mock_judge.evaluate.return_value = self.sample_payload
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "fake_nv_key", "LLM_PROVIDER": "nvidia"}):
+            with patch("agente.evaluate_v2.create_semantic_judge", return_value=mock_judge):
+                with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+                    exit_code = evaluate_v2.main(["--zip", self.temp_zip.name, "--provider", "nvidia"])
+
+        self.assertEqual(exit_code, 0)
+        output_json = json.loads(stdout.getvalue())
+        self.assertEqual(output_json["evaluation_status"], "completed")
+        self.assertEqual(len(output_json["dimensions"]), 5)
+        self.assertAlmostEqual(output_json["final_score"], 61.25, places=2)
+
 
 
 if __name__ == "__main__":
