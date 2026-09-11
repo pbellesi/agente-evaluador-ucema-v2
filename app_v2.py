@@ -3,6 +3,7 @@ Interfaz local Streamlit para el Agente Evaluador UCEMA V2.
 Permite ejecutar evaluaciones semánticas locales de archivos ZIP individuales o en lote.
 """
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -133,17 +134,27 @@ def render_app():
         status_box = st.empty()
 
         outcomes: List[ProjectEvaluationOutcome] = []
+        if "evaluation_cache" not in st.session_state:
+            st.session_state["evaluation_cache"] = {}
 
         for idx, uploaded_file in enumerate(uploaded_files):
-            status_box.info(f"⏳ Procesando **{uploaded_file.name}** ({idx + 1}/{total_files})...")
             zip_bytes = uploaded_file.getvalue()
+            zip_sha256 = hashlib.sha256(zip_bytes).hexdigest()
 
-            outcome = evaluate_project_zip(
-                zip_bytes=zip_bytes,
-                filename=uploaded_file.name,
-                judge=judge,
-                rubric_text=rubric_text,
-            )
+            if zip_sha256 in st.session_state["evaluation_cache"]:
+                status_box.info(f"⚡ Recuperando de caché (0 llamadas LLM): **{uploaded_file.name}** ({idx + 1}/{total_files})...")
+                outcome = st.session_state["evaluation_cache"][zip_sha256]
+            else:
+                status_box.info(f"⏳ Evaluando **{uploaded_file.name}** ({idx + 1}/{total_files})...")
+                outcome = evaluate_project_zip(
+                    zip_bytes=zip_bytes,
+                    filename=uploaded_file.name,
+                    judge=judge,
+                    rubric_text=rubric_text,
+                )
+                if outcome.status == "OK":
+                    st.session_state["evaluation_cache"][zip_sha256] = outcome
+
             outcomes.append(outcome)
             progress_bar.progress((idx + 1) / total_files)
 
