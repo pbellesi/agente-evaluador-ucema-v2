@@ -23,28 +23,14 @@ load_dotenv()
 
 from src.batch_evaluator import (
     ProjectEvaluationOutcome,
-    evaluate_project_zip,
-    load_rubric_text,
 )
 from src.semantic_judge import (
-    SemanticJudgeConfigError,
-    create_semantic_judge,
     resolve_gemini_api_key,
-    resolve_gemini_model,
-    resolve_llm_provider,
-    resolve_nvidia_api_key,
-    resolve_nvidia_model,
 )
+from src.simple_evaluator import evaluate_project_zip as evaluate_simple_zip
 
-
-def get_active_provider() -> str:
-    return resolve_llm_provider()
-
-
-def get_provider_details(provider: str) -> tuple[str | None, str, str]:
-    if provider == "nvidia":
-        return resolve_nvidia_api_key(), resolve_nvidia_model(), "NVIDIA_API_KEY"
-    return resolve_gemini_api_key(), resolve_gemini_model(), "GEMINI_API_KEY"
+OFFICIAL_PROVIDER = "Gemini"
+OFFICIAL_MODEL = "gemini-3.6-flash"
 
 
 def render_app():
@@ -57,45 +43,33 @@ def render_app():
     st.title("Agente Evaluador UCEMA V2")
     st.caption("Evaluación semántica de repositorios mediante LLM y runtime determinístico.")
 
-    provider = get_active_provider()
-    api_key, model_name, key_name = get_provider_details(provider)
+    api_key = resolve_gemini_api_key()
 
     # Sidebar: Configuración e Información
     with st.sidebar:
         st.header("Configuración")
-        st.text_input(
-            "Proveedor LLM",
-            value=provider.upper(),
-            disabled=True,
-            help="Proveedor configurado en LLM_PROVIDER (gemini o nvidia).",
-        )
-        st.text_input(
-            "Modelo configurado",
-            value=model_name,
-            disabled=True,
-            help=f"Modelo utilizado por el Juez Semántico V2 ({key_name.split('_')[0]}_MODEL o default del sistema).",
-        )
+        st.info(f"Evaluador: {OFFICIAL_PROVIDER} · {OFFICIAL_MODEL}")
 
         if api_key:
-            st.success(f"{key_name}: Configurada")
+            st.success("GEMINI_API_KEY: Configurada")
         else:
-            st.error(f"{key_name}: No detectada")
-            st.warning(f"Defina {key_name} en variables de entorno, archivo .env o en st.secrets de Streamlit Cloud.")
+            st.error("GEMINI_API_KEY: No detectada")
+            st.warning("Defina GEMINI_API_KEY en variables de entorno, archivo .env o en st.secrets de Streamlit Cloud.")
 
         st.markdown("---")
         st.markdown(
-            "**Pipeline V2:**\n"
+            "**Pipeline Oficial:**\n"
             "1. Ingesta segura de ZIP en memoria\n"
-            "2. ContextBuilder (inventario y contexto)\n"
-            f"3. SemanticJudge ({provider.upper()}) (análisis interpretativo)\n"
-            "4. EvaluationValidator (verificación y scoring matemático)"
+            "2. ContextBuilder (inventario y contexto neutral)\n"
+            f"3. Gemini LLM Judge (`{OFFICIAL_MODEL}`, $T=0.0$)\n"
+            "4. EvaluationValidator (verificación D1-D5 y scoring matemático)"
         )
 
     # Verificación de API Key antes de permitir evaluar
     if not api_key:
         st.error(
-            f"⚠️ No se encontró la variable {key_name}. "
-            f"Por favor, configure {key_name} en las variables de entorno, en el archivo `.env` o en los Secrets de Streamlit Community Cloud para poder ejecutar las evaluaciones."
+            "⚠️ No se encontró la variable GEMINI_API_KEY. "
+            "Por favor, configure GEMINI_API_KEY en las variables de entorno, en el archivo `.env` o en los Secrets de Streamlit Community Cloud para poder ejecutar las evaluaciones."
         )
 
     # 1. Carga de Archivos
@@ -122,13 +96,6 @@ def render_app():
         st.session_state["outcomes"] = []
 
     if start_eval and uploaded_files and api_key:
-        try:
-            judge = create_semantic_judge(provider=provider, model_name=model_name)
-        except SemanticJudgeConfigError as err:
-            st.error(f"Error de configuración: {err}")
-            return
-
-        rubric_text = load_rubric_text()
         total_files = len(uploaded_files)
         progress_bar = st.progress(0.0)
         status_box = st.empty()
@@ -146,14 +113,25 @@ def render_app():
                 outcome = st.session_state["evaluation_cache"][zip_sha256]
             else:
                 status_box.info(f"⏳ Evaluando **{uploaded_file.name}** ({idx + 1}/{total_files})...")
-                outcome = evaluate_project_zip(
-                    zip_bytes=zip_bytes,
-                    filename=uploaded_file.name,
-                    judge=judge,
-                    rubric_text=rubric_text,
-                )
-                if outcome.status == "OK":
+                try:
+                    res = evaluate_simple_zip(
+                        zip_source=zip_bytes,
+                        zip_name=uploaded_file.name,
+                        api_key=api_key,
+                        model_name=OFFICIAL_MODEL,
+                    )
+                    outcome = ProjectEvaluationOutcome(
+                        project_name=uploaded_file.name,
+                        status="OK",
+                        result=res,
+                    )
                     st.session_state["evaluation_cache"][zip_sha256] = outcome
+                except Exception as exc:
+                    outcome = ProjectEvaluationOutcome(
+                        project_name=uploaded_file.name,
+                        status="ERROR",
+                        error_message=str(exc),
+                    )
 
             outcomes.append(outcome)
             progress_bar.progress((idx + 1) / total_files)
