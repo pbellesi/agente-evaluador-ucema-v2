@@ -33,11 +33,14 @@ Cierre de entrega: motor final y System Prompt operativo integrados y congelados
 - Contrato sintético de aceptación completado: 31/31 acceptance tests y 69/69 pruebas de la suite completa.
 - Casos oficiales coherentes: Excelente 88,75; Flojo 28,75; Tramposo 21,25.
 - Regresión externa completada: PULSO 85,0; SACME 96,25; Lapeque26 92,5; tubidj10 85,0; SilA066 85,0; FSio 92,5; El-Diegote 92,5.
-- Evaluador V2 Determinístico con Enriquecimiento Semántico (DEC-019):
+- Evaluador V2 Determinístico con Enriquecimiento Semántico (DEC-019 / DEC-020):
   - Autoridad inmutable de scoring en el motor determinístico en Python: D1-D5, pesos y nota final calculados por gates de evidencia objetiva.
+  - Generalización agnóstica de la rúbrica (DEC-020): soporte para agentes de plataforma (`platform_agent`) y basados en contratos de prompt (`prompt_contract_agent`) sin sobreajuste estructural a scripts locales `.py`.
+  - Detección de inconsistencias cronológicas y discrepancias de contrato de salida en corridas (acotando D3 a 75%).
+  - Detección generalizada de prompt injection en `README.md`, `prompts/`, `corridas/` y `docs/`, con registro en notas de integridad e invalidación de corridas manipuladas.
   - El LLM (Gemini/NVIDIA) actúa exclusivamente como analista cualitativo (findings, comprensión y sugerencias).
   - Resiliencia Zero-API ante HTTP 429/503/timeout o ausencia de API key, completando con status 'OK' y nota determinística oficial.
-  - Suite de 179 pruebas pasando en verde (179/179 PASS).
+  - Suite de 201 pruebas pasando en verde (201/201 PASS).
   - Test-retest verificado sobre los 7 trabajos reales de alumnos con varianza exactamente 0.00 en 3 corridas consecutivas.
   - Versionado de evaluador (`v2-deterministic-score-1`) con clave de caché `f"{EVALUATOR_VERSION}:{zip_sha256}"`.
 

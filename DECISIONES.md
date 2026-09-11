@@ -280,3 +280,33 @@ Las acciones fueron solicitadas y validadas por el coordinador. Codex no tomó d
   - `tf-conciliador-d.zip`: 28.75 / 28.75 / 28.75 (Varianza = 0.00)
 - Suite completa de 179 pruebas pasando en verde (179/179 PASS).
 - Prueba real con Gemini ante HTTP 429 confirmó preservación exacta de la nota determinística sin excepciones no controladas.
+
+## DEC-020 — Generalización agnóstica de la rúbrica determinística y soporte de agentes de plataforma / contratos
+
+**Estado:** Vigente<br>
+**Responsable / participantes:** Pablo Bellesi, coordinación y arquitectura.<br>
+**IA utilizada:** Antigravity (Google DeepMind), para diagnóstico de causa raíz, diseño por TDD, implementación y verificación test-retest sin dependencias externas.<br>
+**Contexto:**
+- El motor determinístico V2 inicial presentaba un sobreajuste estructural a los fixtures sintéticos originales (dependencia rígida de scripts `.py` locales, encabezados exactos de tablas markdown en DECISIONES.md, etc.).
+- Al evaluar los trabajos reales `tf-conciliador-a`, `b`, `c` y `d`, el motor produjo una calificación idéntica (28.75) para los cuatro, omitiendo distinciones sustantivas en su arquitectura, calidad de evidencia, consistencia cronológica e intentos de manipulación de evaluación.
+- Se requería eliminar el sobreajuste preservando el principio innegociable: **Misma evidencia + Misma versión = Mismo puntaje (Varianza = 0.00)**, agregando la propiedad de que **evidencia semánticamente equivalente expresada en estructuras distintas debe poder satisfacer los mismos criterios de rúbrica**.
+
+**Decisión:**
+1. **D1 (Sistema funcionando):** Clasificación agnóstica de arquitectura (`platform_agent`, `prompt_contract_agent`). Sistemas basados en plataformas integradas o contratos operativos con conectores inspeccionables, prompts sustantivos y corridas reproducibles acceden a los niveles correspondientes (50/75/100) sin exigir scripts locales de Python. Se rechaza la elevación a niveles superiores si los reclamos de conectores o plataformas carecen de respaldo físico en los artefactos.
+2. **D2 (Proceso documentado):** Reconocimiento de iteraciones, correcciones y decisiones expresadas en primera persona ("qué cambié", "qué aprendí", "agregué") vinculadas con artefactos del repositorio.
+3. **D3 (Formato y reproducibilidad):** Validación de consistencia cronológica monótona entre corridas (fechas no invertidas) y estricta coherencia de contrato entre las categorías de salida observadas y las definidas en el prompt. Inconsistencias cronológicas o salidas no contempladas acotan D3 al 75%.
+4. **D4 (Análisis económico):** Desacoplamiento de contradicción para agentes de plataforma/contrato con métricas cuantitativas verificables de tokens, costos y modelos seleccionados.
+5. **D5 (Gobierno y riesgo):** Extracción agnóstica de los ejes de gobernanza (permisos, supervisión humana, mitigación) a partir de tablas operativas y matrices documentadas.
+6. **Integridad y Detección de Prompt Injection:** Escaneo generalizado en `README.md`, `prompts/`, `corridas/` y `docs/` de directivas dirigidas a manipular al evaluador, reportando alertas en `integrity_notes` e invalidando corridas manipuladas.
+
+**Evidencia / Resultado:**
+- Suite de pruebas ampliada a 201 tests (201/201 PASS).
+- Preservación íntegra de benchmarks canónicos: Excelente (88.75), Flojo (32.50), Tramposo (25.00 con todas las contradicciones e inyecciones detectadas).
+- Evaluación test-retest (3 corridas independientes offline) sobre los 7 trabajos reales con **Varianza = 0.00**:
+  - `caso-01.zip`: 90.00
+  - `caso-02.zip`: 40.00 (incompatibilidad de identificadores input-output detectada)
+  - `caso-06.zip`: 100.00
+  - `tf-conciliador-a.zip`: 96.25 (agente con conector, historial completo y gobernanza operativa)
+  - `tf-conciliador-b.zip`: 96.25 (agente con conector, historial completo y gobernanza operativa)
+  - `tf-conciliador-c.zip`: 77.50 (inyecciones en prompt y salida de corrida detectadas; corrida invalidada)
+  - `tf-conciliador-d.zip`: 85.00 (inconsistencia cronológica y de contrato detectadas; D3 acotado a 75)
