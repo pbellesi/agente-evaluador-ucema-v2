@@ -10,6 +10,7 @@ from src.semantic_judge import (
     GeminiSemanticJudge,
     SemanticJudgeConfigError,
     SemanticJudgeEvaluationError,
+    resolve_gemini_model,
 )
 
 
@@ -57,16 +58,40 @@ class TestSemanticJudge(unittest.TestCase):
                 GeminiSemanticJudge(api_key=None)
             self.assertIn("GEMINI_API_KEY", str(ctx.exception))
 
+    def test_resolve_gemini_model_priority(self):
+        # 1. Sin GEMINI_MODEL -> usa DEFAULT_MODEL
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(resolve_gemini_model(), GeminiSemanticJudge.DEFAULT_MODEL)
+            self.assertEqual(resolve_gemini_model(None), "gemini-3.8-flash")
+
+        # 2. Con GEMINI_MODEL=gemini-3.6-flash -> usa gemini-3.6-flash
+        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):
+            self.assertEqual(resolve_gemini_model(), "gemini-3.6-flash")
+            self.assertEqual(resolve_gemini_model(None), "gemini-3.6-flash")
+
+        # 3. Parámetro explícito -> tiene prioridad sobre env
+        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):
+            self.assertEqual(resolve_gemini_model("gemini-2.5-pro"), "gemini-2.5-pro")
+            self.assertEqual(resolve_gemini_model("explicit-override"), "explicit-override")
+
     def test_gemini_judge_model_name_configurable(self):
+        # Sin GEMINI_MODEL -> usa DEFAULT_MODEL
         with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123"}, clear=True):
             with patch("google.genai.Client"):
                 judge_default = GeminiSemanticJudge()
                 self.assertEqual(judge_default.model_name, "gemini-3.8-flash")
 
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123", "GEMINI_MODEL": "gemini-2.5-pro"}, clear=True):
+        # Con GEMINI_MODEL=gemini-3.6-flash -> usa gemini-3.6-flash
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123", "GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):
             with patch("google.genai.Client"):
                 judge_custom = GeminiSemanticJudge()
-                self.assertEqual(judge_custom.model_name, "gemini-2.5-pro")
+                self.assertEqual(judge_custom.model_name, "gemini-3.6-flash")
+
+        # Parámetro explícito -> tiene prioridad sobre env
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123", "GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):
+            with patch("google.genai.Client"):
+                judge_explicit = GeminiSemanticJudge(model_name="gemini-1.5-pro")
+                self.assertEqual(judge_explicit.model_name, "gemini-1.5-pro")
 
     def test_gemini_judge_success_with_mock_client(self):
         mock_client = MagicMock()
@@ -80,7 +105,7 @@ class TestSemanticJudge(unittest.TestCase):
         self.assertEqual(result, self.sample_payload)
         mock_client.models.generate_content.assert_called_once()
         _, kwargs = mock_client.models.generate_content.call_args
-        self.assertEqual(kwargs["model"], "gemini-3.8-flash")
+        self.assertEqual(kwargs["model"], judge.model_name)
         config = kwargs["config"]
         self.assertEqual(config.response_schema, SemanticJudgePayload)
         self.assertEqual(config.temperature, 0.2)

@@ -2,8 +2,11 @@ import json
 import os
 from abc import ABC, abstractmethod
 from typing import Optional
+from pathlib import Path
 from dotenv import load_dotenv
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env")
 load_dotenv()
 
 from pydantic import ValidationError
@@ -81,6 +84,23 @@ Tu orden de razonamiento DEBE ser estrictamente el siguiente:
 """
 
 
+def resolve_gemini_model(model_name: Optional[str] = None) -> str:
+    """
+    Resuelve el modelo Gemini a utilizar con estricta prioridad en runtime:
+    1. parámetro explícito model_name, si existe y no está vacío
+    2. os.getenv("GEMINI_MODEL"), si está definido y no está vacío
+    3. GeminiSemanticJudge.DEFAULT_MODEL como fallback
+    """
+    if model_name is not None and str(model_name).strip():
+        return str(model_name).strip()
+
+    env_model = os.getenv("GEMINI_MODEL")
+    if env_model is not None and env_model.strip():
+        return env_model.strip()
+
+    return GeminiSemanticJudge.DEFAULT_MODEL
+
+
 class GeminiSemanticJudge(SemanticJudge):
     """
     Adaptador del juez semántico que utiliza Google Gemini mediante el SDK oficial google-genai.
@@ -102,7 +122,7 @@ class GeminiSemanticJudge(SemanticJudge):
                 "Definí GEMINI_API_KEY en tu entorno para usar el evaluador semántico."
             )
         self.api_key = resolved_key
-        self.model_name = model_name or os.getenv("GEMINI_MODEL") or self.DEFAULT_MODEL
+        self.model_name = resolve_gemini_model(model_name)
 
         if client is not None:
             self.client = client
