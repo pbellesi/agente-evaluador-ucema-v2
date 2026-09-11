@@ -29,7 +29,7 @@ def evaluate_repository_deterministically(repo_data: dict) -> EvaluationResult:
     ev1 = []
     missing1 = None
     
-    if not ev["has_code"]:
+    if not ev.get("has_inspectable_system", ev["has_code"]):
         lvl1 = 0
         if _coverage_limited(ev, "implementation"):
             just1 = "Hay archivos de implementación en el inventario, pero no fueron inspeccionados completamente por límites de recuperación."
@@ -62,24 +62,31 @@ def evaluate_repository_deterministically(repo_data: dict) -> EvaluationResult:
         ev1 = ev["found_dummies"] + ["Prompts sustantivos presentes en prompts/"]
         just1 = "Existen prompts sustantivos y corridas, pero la integración con herramientas contiene componentes simulados."
         missing1 = "Implementar la llamada o conector real sin simulación."
-    elif (ev["has_substantive_prompts"] and 
-          ev["corrida_count"] >= 1 and 
-          not ev["has_dummy_connectors"] and 
-          ev["system_type"] == "real_execution" and 
-          ev["gov_axes"].get("human_review", False) and 
+    elif (ev["has_substantive_prompts"] and
+          ev["corrida_count"] >= 1 and
+          not ev["has_dummy_connectors"] and
+          ev["system_type"] in ["real_execution", "platform_agent"] and
+          ev["gov_axes"].get("human_review", False) and
           not any("corridas" in c or "agente" in c for c in ev["contradictions"])):
         lvl1 = 100
-        ev1 = [f"Código en {f}" for f in ev["code_files"][:2]] + ["Prompts sustantivos en prompts/", f"{ev['corrida_count']} corrida(s) en corridas/", "Supervisión humana documentada"]
-        just1 = "El sistema demuestra ejecución real verificable con herramientas, prompts sustantivos, corridas respaldadas y esquema de supervisión humana documentada."
+        ev_prefix = [f"Código en {f}" for f in ev["code_files"][:2]] if ev["has_code"] else ["Sistema de plataforma/conector inspeccionable"]
+        ev1 = ev_prefix + ["Prompts sustantivos en prompts/", f"{ev['corrida_count']} corrida(s) en corridas/", "Supervisión humana documentada"]
+        just1 = "El sistema demuestra ejecución real/verificable con herramientas, prompts sustantivos, corridas respaldadas y esquema de supervisión humana documentada."
         missing1 = "Mantener la observabilidad y trazabilidad del sistema en producción."
     elif (ev["has_substantive_prompts"] and 
           ev["corrida_count"] >= 1 and 
           not ev["has_dummy_connectors"] and 
-          ev["system_type"] == "real_execution"):
+          ev["system_type"] in ["real_execution", "platform_agent"]):
         lvl1 = 75
-        ev1 = [f"Código en {f}" for f in ev["code_files"][:2]] + ["Prompts sustantivos en prompts/", f"{ev['corrida_count']} corrida(s) en corridas/"]
-        just1 = "El sistema cuenta con código ejecutable, prompts sustantivos con rol/instrucciones y corridas reales con salidas estructuradas."
+        ev_prefix = [f"Código en {f}" for f in ev["code_files"][:2]] if ev["has_code"] else ["Sistema de plataforma/conector inspeccionable"]
+        ev1 = ev_prefix + ["Prompts sustantivos en prompts/", f"{ev['corrida_count']} corrida(s) en corridas/"]
+        just1 = "El sistema cuenta con código/especificación ejecutable, prompts sustantivos con rol/instrucciones y corridas reales con salidas estructuradas."
         missing1 = "Demostrar integración completa con conector real y supervisión documentada."
+    elif ev["system_type"] == "prompt_contract_agent" and ev["corrida_count"] >= 1:
+        lvl1 = 50
+        ev1 = ["Prompts sustantivos en prompts/", f"{ev['corrida_count']} corrida(s) en corridas/"]
+        just1 = "El sistema cuenta con especificación operativa mediante contrato de prompts y corridas reproducibles, pero carece de conector a herramientas."
+        missing1 = "Incorporar conector o integración efectiva con herramientas del entorno."
     else:
         lvl1 = 25
         just1 = "Existe un intento inspeccionable, pero no se demuestran los gates obligatorios de niveles superiores."
@@ -190,16 +197,16 @@ def evaluate_repository_deterministically(repo_data: dict) -> EvaluationResult:
         missing3 = "Conservar la triada completa y vinculada para cada corrida identificable."
     elif (ev["mandatory_structure"]["is_complete"] and 
           ev["complete_trace_count"] >= 3 and
-          not any("salida" in c or "corridas" in c for c in ev["contradictions"])):
+          not any("salida" in c or "corridas" in c or "cronológica" in c or "contrato" in c for c in ev["contradictions"])):
         lvl3 = 100
         ev3 = [f"Estructura completa y {ev['corrida_count']} corridas reales que conservan entrada, salida y fecha de forma transparente"]
         just3 = "La estructura obligatoria está completa y existen al menos 3 corridas reales identificables con preservación completa de entrada, salida y fecha."
         missing3 = "Mantener la actualización de corridas al incorporar nuevas iteraciones."
     elif ev["identified_run_count"] >= 3 and ev["complete_trace_count"] >= 3:
         lvl3 = 75
-        ev3 = [f"{ev['corrida_count']} corridas físicamente presentes, pero con salidas invalidadas por contradicción con el código ejecutable"]
-        just3 = "La estructura obligatoria está presente y existen al menos 3 corridas, pero las salidas declaradas son contradichas por el código real, impidiendo la reproducibilidad plena a 100% (aplica Regla de Invalidez de Evidencia)."
-        missing3 = "Asegurar que las salidas conservadas en corridas/ puedan ser producidas de forma transparente por el código ejecutable."
+        ev3 = [f"{ev['corrida_count']} corridas físicamente presentes, pero con inconsistencias en trazas, fechas o contrato"]
+        just3 = "La estructura obligatoria está presente y existen al menos 3 corridas, pero presentan inconsistencias en secuencia cronológica o contrato de salidas, impidiendo la reproducibilidad plena a 100%."
+        missing3 = "Asegurar la coherencia estricta entre el contrato de prompts, las salidas estructuradas y la secuencia cronológica de corridas."
     else:
         lvl3 = 25
         just3 = "La estructura básica está presente pero las corridas están incompletas o inaccesibles."

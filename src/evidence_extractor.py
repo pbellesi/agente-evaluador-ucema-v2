@@ -311,6 +311,102 @@ def _run_trace_summary(corrida_files: List[str], file_contents: Dict[str, str], 
     return max(identifiable_groups, metadata_traces), max(complete_groups, metadata_traces)
 
 
+def _parse_run_date(text: str) -> Optional[str]:
+    # Match ISO YYYY-MM-DD
+    m_iso = re.search(r"(\d{4})[-/](\d{2})[-/](\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?", text)
+    if m_iso:
+        time_part = f"T{m_iso.group(4) or '00'}:{m_iso.group(5) or '00'}:{m_iso.group(6) or '00'}"
+        return f"{m_iso.group(1)}-{m_iso.group(2)}-{m_iso.group(3)}{time_part}"
+    # Match DD/MM/YYYY
+    m_dmy = re.search(r"(\d{2})[-/](\d{2})[-/](\d{4})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?", text)
+    if m_dmy:
+        time_part = f"T{m_dmy.group(4) or '00'}:{m_dmy.group(5) or '00'}:{m_dmy.group(6) or '00'}"
+        return f"{m_dmy.group(3)}-{m_dmy.group(2)}-{m_dmy.group(1)}{time_part}"
+    return None
+
+
+def _check_chronological_inversion(corrida_files: List[str], file_contents: Dict[str, str]) -> bool:
+    grouped = _run_groups(corrida_files)
+    if len(grouped) < 2:
+        return False
+    sorted_group_names = sorted(grouped.keys())
+
+    def _path_priority(p: str) -> int:
+        lp = p.lower()
+        if "fecha" in lp or "date" in lp or "timestamp" in lp:
+            return 0
+        if "metadata" in lp or "meta" in lp:
+            return 1
+        if "salida" in lp or "output" in lp:
+            return 2
+        if "resumen" in lp or "summary" in lp:
+            return 3
+        if "manifiesto" in lp or "manifest" in lp:
+            return 4
+        if "entrada" in lp or "factura" in lp or "input" in lp:
+            return 10
+        return 5
+
+    parsed = []
+    for g in sorted_group_names:
+        paths = sorted(grouped[g], key=_path_priority)
+        g_date = None
+        for p in paths:
+            d = _parse_run_date(file_contents.get(p, ""))
+            if d:
+                g_date = d
+                break
+        if g_date:
+            parsed.append((g, g_date))
+    for i in range(len(parsed) - 1):
+        if parsed[i][1] > parsed[i + 1][1]:
+            return True
+    return False
+
+
+def _check_contract_discrepancy(prompt_files: List[str], corrida_files: List[str], file_contents: Dict[str, str]) -> bool:
+    main_prompts = [
+        p for p in prompt_files
+        if "variante" not in p.lower() and "old" not in p.lower() and "v1" not in p.lower() and "v2" not in p.lower() and "v4" not in p.lower()
+    ]
+    if not main_prompts:
+        main_prompts = prompt_files
+    prompt_text = " ".join(file_contents.get(p, "") for p in main_prompts)
+
+    # Search for category declarations in prompt
+    cat_matches = re.findall(
+        r"(?:categor[íi]as?|clasific(?:ar|[áa])(?:\s+estrictamente)?(?:\s+en)?)\s*:\s*([A-Za-z0-9_/\s,-]+)",
+        prompt_text,
+        re.IGNORECASE
+    )
+    declared_categories = set()
+    for cm in cat_matches:
+        parts = re.split(r"[/,y\s]+", cm.strip())
+        for p in parts:
+            clean = p.strip().strip(".,;:\"'")
+            if clean and clean.isupper() and len(clean) >= 3:
+                declared_categories.add(clean)
+
+    if len(declared_categories) < 2:
+        return False
+
+    # Check outputs for categories not in declared_categories
+    for cf in corrida_files:
+        if "salida" in cf.lower() or "output" in cf.lower() or "result" in cf.lower():
+            content = file_contents.get(cf, "")
+            # Check JSON values
+            for m in re.finditer(r'"(?:resultado|clasificacion|clasificaci[oó]n|categoria|categor[íi]a|estado)":\s*"([^"]+)"', content, re.IGNORECASE):
+                val = m.group(1).strip()
+                if val.isupper() and len(val) >= 3 and val not in declared_categories:
+                    return True
+            # Check JSON summary keys under "resultado"
+            for m in re.finditer(r'"([A-Z0-9_]{3,})":\s*\d+', content):
+                val = m.group(1).strip()
+                if val.isupper() and val not in declared_categories and val not in {"TOTAL", "COUNT", "STATUS", "CODE"}:
+                    return True
+    return False
+
+
 def extract_objective_evidence(repo_data: dict) -> dict:
     """
     Extrae evidencias objetivas y agnósticas del repositorio objetivo.
@@ -395,18 +491,6 @@ def extract_objective_evidence(repo_data: dict) -> dict:
             if re.search(pat, content, re.IGNORECASE):
                 found_real_execution.append(f"{cf}: patrón de ejecución/procesamiento ('{pat}')")
 
-    # Clasificación objetiva del sistema
-    if not has_code:
-        system_type = "no_code"
-    elif has_dummy_connectors and not found_real_execution:
-        system_type = "dummy_placeholder_only"
-    elif found_real_execution and has_dummy_connectors:
-        system_type = "partial_simulated_tool"
-    elif found_real_execution:
-        system_type = "real_execution"
-    else:
-        system_type = "rule_based_local"
-
     # -------------------------------------------------------------------------
     # 3. Análisis de Prompts
     # -------------------------------------------------------------------------
@@ -415,8 +499,8 @@ def extract_objective_evidence(repo_data: dict) -> dict:
     
     for pf in prompt_files:
         content = file_contents.get(pf, "").strip()
-        # Se considera sustantivo si tiene > 100 caracteres y define rol o instrucciones
-        if len(content) > 100 and any(kw in content.lower() for kw in ["rol", "tarea", "instrucción", "instrucciones", "sistema", "usuario", "prompt"]):
+        # Se considera sustantivo si tiene >= 60 caracteres y define rol o instrucciones
+        if len(content) >= 60 and any(kw in content.lower() for kw in ["rol", "tarea", "instrucción", "instrucciones", "sistema", "usuario", "prompt"]):
             has_substantive_prompts = True
             break
 
@@ -448,6 +532,39 @@ def extract_objective_evidence(repo_data: dict) -> dict:
     has_complete_triad = complete_trace_count >= 3
     corrida_count = max(corrida_count, identifiable_run_count)
 
+    has_inspectable_system = has_code or (
+        has_substantive_prompts and (corrida_count >= 1 or any(
+            any(t in p.lower() for t in ("salida", "output", "result"))
+            for p in all_paths
+        ))
+    )
+
+    # Clasificación objetiva del sistema
+    if not has_code:
+        if has_inspectable_system:
+            platform_keywords = [
+                "conector", "connector", "google drive", "claude cowork",
+                "sheets", "zapier", "make", "airtable", "salesforce"
+            ]
+            all_text_search = " ".join([
+                file_contents.get(p, "") for p in all_paths
+                if any(sec in p.lower() for sec in ["readme", "prompts/", "docs/"])
+            ]).lower()
+            if any(kw in all_text_search for kw in platform_keywords):
+                system_type = "platform_agent"
+            else:
+                system_type = "prompt_contract_agent"
+        else:
+            system_type = "no_code"
+    elif has_dummy_connectors and not found_real_execution:
+        system_type = "dummy_placeholder_only"
+    elif found_real_execution and has_dummy_connectors:
+        system_type = "partial_simulated_tool"
+    elif found_real_execution:
+        system_type = "real_execution"
+    else:
+        system_type = "rule_based_local"
+
     # -------------------------------------------------------------------------
     # 5. Análisis de Decisiones (DECISIONES.md)
     # -------------------------------------------------------------------------
@@ -472,19 +589,24 @@ def extract_objective_evidence(repo_data: dict) -> dict:
 
             has_context = any(kw in sec_lower for kw in [
                 "contexto", "problema", "primera versión", "anteriormente", "necesitábamos", "por qué", "por que",
-                "se consideró", "prueba", "situación", "desafío", "issue", "caso", "versión inicial", "primera implementación"
+                "se consideró", "prueba", "situación", "desafío", "issue", "caso", "versión inicial", "primera implementación",
+                "qué falló", "que fallo", "falló", "fallo", "falla", "error", "errores", "se observó", "se observo"
             ])
             has_change = any(kw in sec_lower for kw in [
                 "decisión", "decidimos", "cambio", "se definió", "se definieron", "se redujo", 
-                "elegimos", "migramos", "adoptamos", "incorporamos", "implementamos", "solución", "integrar", "determinó", "diseño", "se adoptó", "se retiró", "se ejecutaron", "corrección", "se agregó", "se agrego", "se cambió", "se cambio", "se actualizó", "se actualizo"
+                "elegimos", "migramos", "adoptamos", "incorporamos", "implementamos", "solución", "integrar", "determinó", "diseño",
+                "se adoptó", "se retiró", "se ejecutaron", "corrección", "se agregó", "se agrego", "se cambió", "se cambio",
+                "se actualizó", "se actualizo", "qué cambié", "que cambie", "agregué", "agregue", "descarté", "descarte", "probé", "probe",
+                "ajusté", "ajuste", "modifiqué", "modifique", "reemplacé", "reemplace"
             ])
             has_impact = any(kw in sec_lower for kw in [
                 "impacto", "motivo", "resultado", "evidencia", "efecto", "beneficio", 
                 "permite", "produjo", "evita", "consecuencia", "ahorro", "mejora", "conservan", "garantizar", "asegurar", "calificación",
-                "limitación", "documentada", "documentado", "registrada", "registrado", "quedó", "quedaron", "mantiene", "firma", "revisa", "reproducibilidad", "trazabilidad", "cumplir"
+                "limitación", "documentada", "documentado", "registrada", "registrado", "quedó", "quedaron", "mantiene", "firma", "revisa",
+                "reproducibilidad", "trazabilidad", "cumplir", "qué aprendí", "que aprendi", "aprendizaje", "permitió", "permitio", "funcionó", "funciono"
             ])
 
-            if is_explicit or (has_context and has_change and has_impact):
+            if is_explicit or (is_iteration and (has_change or (has_context and has_impact))) or (has_context and has_change and has_impact):
                 valid_decisions.append(sec_text)
 
         # Una tabla es una colección de decisiones si explicita columnas de
@@ -520,15 +642,16 @@ def extract_objective_evidence(repo_data: dict) -> dict:
             fingerprints.append(terms)
     decision_count = len(unique_decisions)
     decisions_lower = decisiones_content.lower()
-    has_process_iteration = bool(re.search(r"\biteraci[oó]n|correcci[oó]n|versi[oó]n\b", decisions_lower))
+    has_process_iteration = bool(re.search(r"\biteraci[oó]n|correcci[oó]n|versi[oó]n|ajuste|evoluci[oó]n\b", decisions_lower))
     process_change_patterns = (
-        r"\b(?:falla|fall[oó]|problema|desv[ií]o|cambio de alcance)\b",
+        r"\b(?:falla|fall[oó]|problema|desv[ií]o|cambio de alcance|qu[eé]\s+fall[oó])\b",
         r"\b(?:problemas?|errores?|fallas?|desv[ií]os?)\b.{0,140}\b(?:detectad\w*|encontrad\w*|correg\w*|llev\w*|motiv\w*|ajust\w*|reemplaz\w*|cambi\w*|actualiz\w*)\b",
         r"\b(?:detectad\w*|encontrad\w*)\b.{0,140}\b(?:problemas?|errores?|fallas?|desv[ií]os?)\b",
         r"\bomit[ií]\w*\b.{0,100}\b(?:informaci[oó]n|campo|dato|contexto)\b",
         r"\b(?:no\s+(?:ten[ií]a|contaba)|sin)\b.{0,100}\b(?:credenciales|acceso|permisos|configuraci[oó]n)\b",
         r"\b(?:clasificaba|respond[ií]a|procesaba|generaba)\b.{0,100}\b(?:incorrectamente|mal|err[oó]neamente)\b",
         r"\b(?:fue necesario|se tuvo que)\b.{0,100}\b(?:corregir|reemplazar|ajustar)\b",
+        r"\b(?:qu[eé]\s+cambi[eé]|qu[eé]\s+aprend[ií]|agregu[eé]|descart[eé]|prob[eé]|ajust[eé])\b",
     )
     has_process_change = any(re.search(pattern, decisions_lower, re.IGNORECASE) for pattern in process_change_patterns)
     linked_artifacts = [path for path in all_paths if path.lower() != (decisiones_file_path or "").lower()]
@@ -571,22 +694,25 @@ def extract_objective_evidence(repo_data: dict) -> dict:
     else:
         gov_content = ""
 
+    clean_gov_content = re.sub(r"(?m)^--- [^\n]+ ---\n?", "", gov_content)
+
     gov_axes = {
-        "permissions": bool(re.search(r'(permiso|sistema|datos|acceso)', gov_content, re.IGNORECASE)),
-        "failures": bool(re.search(r'(falla|riesgo|error|consecuencia)', gov_content, re.IGNORECASE)),
-        "action_plan": bool(re.search(r'(respuesta|mitigación|acción|eventualidad)', gov_content, re.IGNORECASE)),
-        "human_review": bool(re.search(r'(revisión|supervisión|humana|persona)', gov_content, re.IGNORECASE)),
-        "responsible": bool(re.search(r'(responsable|firma|asume)', gov_content, re.IGNORECASE))
+        "permissions": bool(re.search(r'(permiso|sistema|datos|acceso|credencial|token)', clean_gov_content, re.IGNORECASE)),
+        "failures": bool(re.search(r'(falla|riesgo|error|consecuencia|alucinaci[oó]n|discrepancia)', clean_gov_content, re.IGNORECASE)),
+        "action_plan": bool(re.search(r'(respuesta|mitigaci[oó]n|acci[oó]n|eventualidad|protocolo|plan)', clean_gov_content, re.IGNORECASE)),
+        "human_review": bool(re.search(r'(revisi[oó]n|supervisi[oó]n|humana|persona|analista|operador)', clean_gov_content, re.IGNORECASE)),
+        "responsible": bool(re.search(r'(responsable|firma|asume|cargo|dueño|owner)', clean_gov_content, re.IGNORECASE))
     }
     gov_operational_axes = {
-        "permissions": bool(re.search(r'(permiso|acceso).{0,80}(solo|lectura|escritura|restringid|rol|autoriza)|(solo|lectura|escritura|restringid|rol|autoriza).{0,80}(permiso|acceso)', gov_content, re.IGNORECASE)),
-        "failures": bool(re.search(r'(falla|riesgo|error).{0,100}(consecuencia|impacto|puede|afecta)|(consecuencia|impacto|puede|afecta).{0,100}(falla|riesgo|error)', gov_content, re.IGNORECASE)),
-        "action_plan": bool(re.search(r'(respuesta|mitigaci[oó]n|acci[oó]n).{0,100}(bloquear|detener|abrir|notificar|escalar|revisar)|(bloquear|detener|abrir|notificar|escalar).{0,100}(respuesta|mitigaci[oó]n|acci[oó]n)', gov_content, re.IGNORECASE)),
-        "human_review": bool(re.search(r'(persona|humana|supervisi[oó]n|revisi[oó]n|analista).{0,120}(cada|antes|previa|previo|aprob\w*|bloque\w*|escal\w*|criterio|condici[oó]n|todo|reejecut\w*|firma|borrador|no\s+(?:dispara|habilita))|(cada|antes|previa|previo|aprob\w*|bloque\w*|escal\w*|criterio|condici[oó]n|todo|reejecut\w*|firma|borrador|no\s+(?:dispara|habilita)).{0,120}(persona|humana|supervisi[oó]n|revisi[oó]n|analista)', gov_content, re.IGNORECASE)),
-        "responsible": bool(re.search(r'(responsable|firma|asume).{0,100}(final|rol|analista|persona|equipo)|(final|rol|analista|persona).{0,100}(responsable|firma|asume)', gov_content, re.IGNORECASE)),
+        "permissions": bool(re.search(r'(permiso|acceso|credencial|token).{0,80}(solo|lectura|escritura|restringid|rol|autoriza)|(solo|lectura|escritura|restringid|rol|autoriza).{0,80}(permiso|acceso|credencial|token)', clean_gov_content, re.IGNORECASE | re.DOTALL)),
+        "failures": bool(re.search(r'(falla|riesgo|error|alucinaci[oó]n|discrepancia).{0,100}(consecuencia|impacto|puede|afecta|genera|p[eé]rdida)|(consecuencia|impacto|puede|afecta|genera|p[eé]rdida).{0,100}(falla|riesgo|error|alucinaci[oó]n|discrepancia)', clean_gov_content, re.IGNORECASE | re.DOTALL)),
+        "action_plan": bool(re.search(r'(respuesta|mitigaci[oó]n|acci[oó]n|protocolo|plan).{0,120}(bloquear|detener|pausar|abrir|notificar|alertar|escalar|revisar|derivar)|(bloquear|detener|pausar|abrir|notificar|alertar|escalar|derivar).{0,120}(respuesta|mitigaci[oó]n|acci[oó]n|protocolo|plan)', clean_gov_content, re.IGNORECASE | re.DOTALL)),
+        "human_review": bool(re.search(r'(?:persona|humana|supervisi[oó]n|revisi[oó]n|analista|operador).{0,120}\b(?:cada|antes|previa|previo|aprob\w*|bloque\w*|escal\w*|criterio|condici[oó]n|todo|reejecut\w*|firma|borrador|valid\w*|no\s+(?:dispara|habilita))\b|\b(?:cada|antes|previa|previo|aprob\w*|bloque\w*|escal\w*|criterio|condici[oó]n|todo|reejecut\w*|firma|borrador|valid\w*|no\s+(?:dispara|habilita))\b.{0,120}(?:persona|humana|supervisi[oó]n|revisi[oó]n|analista|operador)', clean_gov_content, re.IGNORECASE | re.DOTALL)),
+        "responsible": bool(re.search(r'(responsable|firma|asume|cargo|dueño|owner).{0,100}(final|rol|analista|persona|equipo|jefe|gerente|l[ií]der|contador)|(final|rol|analista|persona|jefe|gerente|l[ií]der|contador).{0,100}(responsable|firma|asume|cargo|dueño|owner)', clean_gov_content, re.IGNORECASE | re.DOTALL)),
     }
-    table_gov_axes = _table_operational_governance_axes(gov_content)
+    table_gov_axes = _table_operational_governance_axes(clean_gov_content)
     gov_operational_axes = {axis: gov_operational_axes[axis] or table_gov_axes[axis] for axis in gov_operational_axes}
+    gov_axes = {axis: gov_axes[axis] or table_gov_axes[axis] for axis in gov_axes}
 
     # -------------------------------------------------------------------------
     # 8. Detección Objetivo de CONTRADICCIONES DE EVIDENCIA
@@ -611,8 +737,10 @@ def extract_objective_evidence(repo_data: dict) -> dict:
         r"omit[ií]?(?:\s+la)?\s+verificaci[oó]n(?:\s+de\s+artefactos?)?",
         r"no\s+report(?:es|e|ar)?\s+inconsistencias",
         r"cambi[áa]?(?:\s+la)?\s+r[úu]brica",
+        r"\b(?:debe\s+)?(?:registrar|asignar|poner|dar|calificar|fijar)\b.{0,60}(?:nota|puntaje|score|puntos|d[1-5]|\d+/\d+|>=?\s*\d+)",
+        r"\b(?:debe\s+)?(?:ignorar|omitir|no\s+(?:leer|revisar))\b.{0,60}(?:instrucci[oó]n|evidencia|error|falla|inconsistencia|c[oó]digo|r[úu]brica)",
     )
-    injection_target = r"(?:sistema\s+de\s+correcci[oó]n|sistema\s+de\s+evaluaci[oó]n|evaluador|corrector)"
+    injection_target = r"(?:sistema\s+de\s+correcci[oó]n|sistema\s+de\s+evaluaci[oó]n|evaluador|corrector|ia\s+evaluadora|grader)"
     for path, content in file_contents.items():
         directives_found = [
             pattern for pattern in injection_directives
@@ -624,6 +752,11 @@ def extract_objective_evidence(repo_data: dict) -> dict:
                 f"Intento de manipulación / prompt injection detectado en {path}: "
                 "instrucción dirigida al evaluador para alterar la corrección."
             )
+            if "corridas/" in path.lower():
+                contradictions.append(
+                    f"Contradicción en {path}: contiene directivas de manipulación / prompt injection dirigidas al evaluador."
+                )
+                invalidated_evidence.append(f"{path} (salida invalidada por intento de manipulación del evaluador)")
 
     # Contradicción D1: Salida afirma haber ejecutado acción que el código no posee
     for cf in corrida_files:
@@ -674,9 +807,20 @@ def extract_objective_evidence(repo_data: dict) -> dict:
         gov_axes["human_review"] = False
         gov_operational_axes["human_review"] = False
 
+    if _check_chronological_inversion(corrida_files, file_contents):
+        contradictions.append(
+            "Inconsistencia cronológica: las corridas presentan fechas invertidas respecto al orden secuencial declarado."
+        )
+
+    if _check_contract_discrepancy(prompt_files, corrida_files, file_contents):
+        contradictions.append(
+            "Inconsistencia de contrato: la salida estructurada contiene valores o categorías no contemplados en el contrato del prompt."
+        )
+
     return {
         "mandatory_structure": mandatory_structure,
         "has_code": has_code,
+        "has_inspectable_system": has_inspectable_system,
         "code_files": code_files,
         "found_dummies": found_dummies,
         "has_dummy_connectors": has_dummy_connectors,
