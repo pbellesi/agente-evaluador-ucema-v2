@@ -1,0 +1,16 @@
+{
+  "fecha_relevamiento": "2026-09-01",
+  "cantidad": 1,
+  "requiere_revision": false,
+  "novedades": [
+    {
+      "titulo": "Alerta sobre fraude digital",
+      "organismo": "UIF",
+      "fecha": "2026-08-29",
+      "url": "https://www.argentina.gob.ar/uif",
+      "categoria": "riesgo",
+      "prioridad": "alta",
+      "fundamento": "Describe un riesgo de incumplimiento o fraude."
+    }
+  ]
+}

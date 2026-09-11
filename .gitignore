@@ -1,0 +1,40 @@
+# Sistema operativo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Archivos temporales
+*.tmp
+*.temp
+*.log
+~$*
+
+# Editores e IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Secretos y variables locales
+.env
+.env.*
+!.env.example
+
+# Antigravity / Serena / Local Secrets
+.serena/
+.gemini/
+.streamlit/secrets.toml
+*.patch
+

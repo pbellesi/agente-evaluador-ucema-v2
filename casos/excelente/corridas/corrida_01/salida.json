@@ -1,0 +1,16 @@
+{
+  "fecha_relevamiento": "2026-09-01",
+  "cantidad": 1,
+  "requiere_revision": false,
+  "novedades": [
+    {
+      "titulo": "Nuevo régimen de reporte",
+      "organismo": "CNV",
+      "fecha": "2026-08-28",
+      "url": "https://www.argentina.gob.ar/cnv",
+      "categoria": "accion",
+      "prioridad": "alta",
+      "fundamento": "Contiene una obligación o vencimiento verificable."
+    }
+  ]
+}

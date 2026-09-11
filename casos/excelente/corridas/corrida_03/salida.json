@@ -1,0 +1,16 @@
+{
+  "fecha_relevamiento": "2026-09-01",
+  "cantidad": 1,
+  "requiere_revision": false,
+  "novedades": [
+    {
+      "titulo": "Consulta sobre simplificación",
+      "organismo": "ARCA",
+      "fecha": "2026-08-30",
+      "url": "https://www.arca.gob.ar",
+      "categoria": "oportunidad",
+      "prioridad": "media",
+      "fundamento": "Habilita una mejora o participación posible."
+    }
+  ]
+}
