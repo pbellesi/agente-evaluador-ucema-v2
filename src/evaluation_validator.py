@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 from pydantic import ValidationError
 
 from src.schema import DimensionResult, EvaluationResult

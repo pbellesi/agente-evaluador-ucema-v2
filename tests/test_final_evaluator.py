@@ -391,6 +391,26 @@ class TestFinalEvaluator(unittest.TestCase):
         )
         self.assertEqual(mock_client.models.generate_content.call_count, 4)  # Nueva evaluación
 
+    def test_app_v2_imports_and_type_hints(self):
+        """Verifica que app_v2 y sus módulos dependientes importen sin NameError o ImportError."""
+        import typing
+        from src.simple_evaluator import (
+            clear_evaluation_cache,
+            evaluate_project_zip,
+            get_runtime_fingerprint,
+        )
+        self.assertTrue(callable(clear_evaluation_cache))
+        self.assertTrue(callable(evaluate_project_zip))
+        self.assertTrue(callable(get_runtime_fingerprint))
+
+        # Forzar evaluación estricta de anotaciones de tipo
+        hints = typing.get_type_hints(validate_and_score_evaluation)
+        self.assertIn("actual_model_used", hints)
+        self.assertIn("runtime_fingerprint", hints)
+
+        import app_v2
+        self.assertIsNotNone(app_v2)
+
 
 if __name__ == "__main__":
     unittest.main()
