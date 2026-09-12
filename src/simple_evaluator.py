@@ -181,7 +181,7 @@ def evaluate_repository_simple(
         )
 
     # Resolución de modelo único y runtime fingerprint
-    resolved_model = resolve_gemini_model(model_name) or "gemini-3.6-flash"
+    resolved_model = resolve_gemini_model(model_name) or "gemini-3.5-flash-lite"
     runtime_fingerprint = get_runtime_fingerprint()
 
     # Carga canónica de prompt y rúbrica

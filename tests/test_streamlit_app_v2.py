@@ -4,7 +4,7 @@ import app_v2
 
 def test_public_streamlit_constants_pinned_to_gemini():
     assert app_v2.OFFICIAL_PROVIDER == "Gemini"
-    assert app_v2.OFFICIAL_MODEL == "gemini-3.6-flash"
+    assert app_v2.OFFICIAL_MODEL == "gemini-3.5-flash-lite"
 
 
 def test_public_streamlit_no_nvidia_or_deepseek_in_ui():

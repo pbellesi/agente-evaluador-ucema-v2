@@ -411,6 +411,51 @@ class TestFinalEvaluator(unittest.TestCase):
         import app_v2
         self.assertIsNotNone(app_v2)
 
+    def test_official_model_and_no_production_fallbacks(self):
+        """Puntos A y B: Verifica OFFICIAL_MODEL y ausencia de fallback en el runtime."""
+        import app_v2
+        self.assertEqual(app_v2.OFFICIAL_PROVIDER, "Gemini")
+        self.assertEqual(app_v2.OFFICIAL_MODEL, "gemini-3.5-flash-lite")
+
+        from src.semantic_judge import resolve_gemini_model
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(resolve_gemini_model(), "gemini-3.5-flash-lite")
+
+        # Verifica llamada directa a gemini-3.5-flash-lite sin especificar modelo
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.parsed = SimpleEvaluationPayload(
+            dimensions=[
+                DimensionAuditItem(dimension=d, level_percent=50, justification="ok")
+                for d in ["D1", "D2", "D3", "D4", "D5"]
+            ],
+            concrete_improvement="Mejora",
+        )
+        mock_client.models.generate_content.return_value = mock_response
+
+        with patch.dict(os.environ, {}, clear=True):
+            res = evaluate_repository_simple(
+                repo_data=self.sample_repo_data,
+                api_key="fake_key",
+                client=mock_client,
+                use_cache=False,
+            )
+            call_kwargs = mock_client.models.generate_content.call_args[1]
+            self.assertEqual(call_kwargs.get("model"), "gemini-3.5-flash-lite")
+            self.assertEqual(res.actual_model_used, "gemini-3.5-flash-lite")
+
+        # Verifica que ante error (429 u otro) falle limpiamente sin switch de modelo
+        mock_client_error = MagicMock()
+        mock_client_error.models.generate_content.side_effect = Exception("429 Resource Exhausted")
+        with self.assertRaises(SemanticJudgeEvaluationError):
+            evaluate_repository_simple(
+                repo_data=self.sample_repo_data,
+                api_key="fake_key",
+                client=mock_client_error,
+                use_cache=False,
+            )
+        self.assertEqual(mock_client_error.models.generate_content.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

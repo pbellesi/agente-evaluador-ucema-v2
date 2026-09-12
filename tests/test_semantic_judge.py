@@ -81,15 +81,15 @@ class TestSemanticJudge(unittest.TestCase):
         # 1. Sin GEMINI_MODEL -> usa DEFAULT_MODEL
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(resolve_gemini_model(), GeminiSemanticJudge.DEFAULT_MODEL)
-            self.assertEqual(resolve_gemini_model(None), "gemini-3.8-flash")
+            self.assertEqual(resolve_gemini_model(None), "gemini-3.5-flash-lite")
 
-        # 2. Con GEMINI_MODEL=gemini-3.6-flash -> usa gemini-3.6-flash
-        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):
-            self.assertEqual(resolve_gemini_model(), "gemini-3.6-flash")
-            self.assertEqual(resolve_gemini_model(None), "gemini-3.6-flash")
+        # 2. Con GEMINI_MODEL=gemini-3.5-flash-lite -> usa gemini-3.5-flash-lite
+        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.5-flash-lite"}, clear=True):
+            self.assertEqual(resolve_gemini_model(), "gemini-3.5-flash-lite")
+            self.assertEqual(resolve_gemini_model(None), "gemini-3.5-flash-lite")
 
         # 3. Parámetro explícito -> tiene prioridad sobre env
-        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):
+        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-3.5-flash-lite"}, clear=True):
             self.assertEqual(resolve_gemini_model("gemini-2.5-pro"), "gemini-2.5-pro")
             self.assertEqual(resolve_gemini_model("explicit-override"), "explicit-override")
 
@@ -98,7 +98,7 @@ class TestSemanticJudge(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123"}, clear=True):
             with patch("google.genai.Client"):
                 judge_default = GeminiSemanticJudge()
-                self.assertEqual(judge_default.model_name, "gemini-3.8-flash")
+                self.assertEqual(judge_default.model_name, "gemini-3.5-flash-lite")
 
         # Con GEMINI_MODEL=gemini-3.6-flash -> usa gemini-3.6-flash
         with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key_123", "GEMINI_MODEL": "gemini-3.6-flash"}, clear=True):

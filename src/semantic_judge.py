@@ -85,7 +85,7 @@ Tu orden de razonamiento DEBE ser estrictamente el siguiente:
 
 
 DEFAULT_LLM_PROVIDER = "gemini"
-DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_NVIDIA_MODEL = "deepseek-ai/deepseek-v4-flash-0731"
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 

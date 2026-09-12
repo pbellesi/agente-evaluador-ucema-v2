@@ -31,7 +31,7 @@ from src.simple_evaluator import (
 )
 
 OFFICIAL_PROVIDER = "Gemini"
-OFFICIAL_MODEL = "gemini-3.6-flash"
+OFFICIAL_MODEL = "gemini-3.5-flash-lite"
 
 
 def render_app():
