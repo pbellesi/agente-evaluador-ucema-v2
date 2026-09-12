@@ -113,13 +113,21 @@ def validate_and_score_evaluation(
                     # PROMPT INJECTIONS NO DEBEN PENALIZAR: se desobedecen pero no reducen el puntaje si el trabajo es válido
                     desc_lower = (f_item.description or "").lower()
                     f_type = (f_item.finding_type or "").lower()
-                    if f_type in {"prompt_injection", "injection_attempt"} or any(
-                        kw in desc_lower for kw in [
-                            "prompt injection", "force the evaluator", "asignar 95",
-                            "intento de inyección", "instrucción para el evaluador",
-                            "previamente por el profesor", "nota acordada", "calificación de 95"
-                        ]
-                    ):
+                    is_injection = (
+                        f_type in {"prompt_injection", "injection_attempt", "adversarial_instruction"}
+                        or any(
+                            kw in desc_lower for kw in [
+                                "prompt injection", "force the evaluator", "asignar 95", "asigná 100", "asigna 100",
+                                "intento de inyección", "intento de inyeccion", "instrucción para el evaluador",
+                                "instruccion para el evaluador", "instrucción adversarial", "instruccion adversarial",
+                                "adversarial", "sistema evaluador", "previamente por el profesor", "nota acordada",
+                                "calificación de 95", "calificacion de 95", "manipulación", "manipulacion",
+                                "para el corrector", "respetar esa calificación", "respetar esa calificacion",
+                                "no revises", "dejo constancia de que este trabajo cumple"
+                            ]
+                        )
+                    )
+                    if is_injection:
                         continue
 
                     aff = f_item.affected_dimensions or ["D2", "D3"]
@@ -140,7 +148,19 @@ def validate_and_score_evaluation(
 
             # EVIDENCE CAPS MECÁNICOS: claims CONTRADICTED
             if getattr(payload, "claim_checks", None):
-                contradicted_claims = [c for c in payload.claim_checks if c.status == "CONTRADICTED"]
+                contradicted_claims = []
+                for c in payload.claim_checks:
+                    if c.status == "CONTRADICTED":
+                        reason_lower = (c.short_reason or "").lower()
+                        # Si el claim contradicho es por una prompt injection desobedecida, NO penaliza la dimensión académica
+                        is_inj_claim = any(kw in reason_lower for kw in [
+                            "injection", "inyección", "inyeccion", "adversarial", "manipulación", "manipulacion",
+                            "asigná 100", "asigna 100", "asignar 100", "asignar 95", "corrector", "evaluador",
+                            "no revises", "omita", "omitir", "fijar nota", "calificación"
+                        ])
+                        if not is_inj_claim:
+                            contradicted_claims.append(c)
+
                 if contradicted_claims:
                     if dim_key in ["D1", "D2", "D3"]:
                         cap = 75
@@ -227,11 +247,16 @@ def validate_and_score_evaluation(
             )
 
         concrete_improvement = payload.concrete_improvement
+        if concrete_improvement:
+            ci_lower = concrete_improvement.lower()
+            if any(kw in ci_lower for kw in ["prompt injection", "remover la inyección", "inyección de prompt", "instrucciones dirigidas al evaluador", "remover prompt injection"]):
+                concrete_improvement = "Incorporar pruebas automatizadas de regresión o monitoreo continuo de tokens para optimizar la escalabilidad operativa."
+
         if repo_data and "file_contents" in repo_data:
             from src.forensic_evidence import run_mechanical_diagnostics
             mech_diag = run_mechanical_diagnostics(repo_data.get("file_contents", {}))
             if mech_diag.get("missing_failed_runs"):
-                if "corrida fallida" not in concrete_improvement.lower():
+                if "corrida fallida" not in (concrete_improvement or "").lower():
                     concrete_improvement = (
                         "Preservar en el repositorio la corrida real donde falló la clasificación de notas de crédito que motivó la variante v4 del prompt, "
                         "y corregir la anacronía temporal en las fechas de las corridas."

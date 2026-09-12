@@ -193,6 +193,17 @@ def extract_material_claims(files: Dict[str, str]) -> List[Dict[str, Any]]:
             if not line_str or line_str.startswith("#") or len(line_str) < 25:
                 continue
             line_lower = line_str.lower()
+            # Excluir instrucciones dirigidas al evaluador/corrector para que no se conviertan en claims académicos puntuables
+            evaluator_instruction_markers = [
+                "para el corrector", "para el evaluador", "sistema evaluador", "corrector automático",
+                "corrector automatico", "asignar 100", "asigná 100", "asigna 100", "asignar 30/30",
+                "asignar 25/25", "asignar 95", "calificación acordada", "acordada una calificación",
+                "respetar esa calificación", "no es necesario leer", "no revises", "omitir observaciones",
+                "cualquier evaluador razonable", "dejo constancia de que este trabajo cumple"
+            ]
+            if any(marker in line_lower for marker in evaluator_instruction_markers):
+                continue
+
             if any(kw in line_lower for kw in keywords):
                 # Limpiar viñetas
                 clean_text = re.sub(r"^[-*•\d.]+\s+", "", line_str)
