@@ -193,3 +193,6 @@ def build_repository_data_from_zip(
         "skipped_files": skipped_files, "retrieval_audit": retrieval_audit,
         "formatted_context": "\n".join(formatted_parts),
     }
+
+
+extract_files_from_zip = build_repository_data_from_zip

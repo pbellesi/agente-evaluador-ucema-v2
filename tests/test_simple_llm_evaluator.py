@@ -140,6 +140,9 @@ class TestSimpleLLMEvaluator(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_gemini_api_failure_raises_clear_error_and_never_returns_zero(self):
         mock_client = MagicMock()
+        mock_chat = MagicMock()
+        mock_chat.send_message.side_effect = RuntimeError("503 Service Unavailable / Quota exceeded")
+        mock_client.chats.create.return_value = mock_chat
         mock_client.models.generate_content.side_effect = RuntimeError("503 Service Unavailable / Quota exceeded")
 
         with patch("time.sleep"):
@@ -188,8 +191,11 @@ class TestSimpleLLMEvaluator(unittest.TestCase):
             )
 
             mock_client = MagicMock()
+            mock_chat = MagicMock()
             mock_response = MagicMock()
             mock_response.parsed = mock_payload
+            mock_chat.send_message.return_value = mock_response
+            mock_client.chats.create.return_value = mock_chat
             mock_client.models.generate_content.return_value = mock_response
 
             result = evaluate_project_zip(
@@ -209,4 +215,4 @@ class TestSimpleLLMEvaluator(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main()

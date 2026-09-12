@@ -52,3 +52,11 @@ class EvaluationResult(BaseModel):
         default="OK",
         description="Estado de ejecución"
     )
+    actual_model_used: Optional[str] = Field(
+        default=None,
+        description="Identificador exacto del modelo LLM utilizado"
+    )
+    runtime_fingerprint: Optional[str] = Field(
+        default=None,
+        description="Huella digital SHA-256 de 12 caracteres del runtime evaluador"
+    )

@@ -1,11 +1,12 @@
 """
 Interfaz local Streamlit para el Agente Evaluador UCEMA V2.
-Permite ejecutar evaluaciones semánticas locales de archivos ZIP individuales o en lote.
+Permite evaluar trabajos de forma rápida, determinística y basada en Evidence Dossier.
 """
 
 import hashlib
 import os
 import sys
+import time
 from pathlib import Path
 from typing import List
 
@@ -21,13 +22,13 @@ if str(PROJECT_ROOT) not in sys.path:
 load_dotenv(PROJECT_ROOT / ".env")
 load_dotenv()
 
-from src.batch_evaluator import (
-    ProjectEvaluationOutcome,
+from src.batch_evaluator import ProjectEvaluationOutcome
+from src.semantic_judge import resolve_gemini_api_key
+from src.simple_evaluator import (
+    clear_evaluation_cache,
+    evaluate_project_zip as evaluate_simple_zip,
+    get_runtime_fingerprint,
 )
-from src.semantic_judge import (
-    resolve_gemini_api_key,
-)
-from src.simple_evaluator import evaluate_project_zip as evaluate_simple_zip
 
 OFFICIAL_PROVIDER = "Gemini"
 OFFICIAL_MODEL = "gemini-3.6-flash"
@@ -40,6 +41,8 @@ def render_app():
         layout="wide",
     )
 
+    runtime_fingerprint = get_runtime_fingerprint()
+
     st.title("Agente Evaluador UCEMA V2")
     st.caption("Evaluación semántica de repositorios mediante LLM y runtime determinístico.")
 
@@ -49,6 +52,7 @@ def render_app():
     with st.sidebar:
         st.header("Configuración")
         st.info(f"Evaluador: {OFFICIAL_PROVIDER} · {OFFICIAL_MODEL}")
+        st.caption(f"Runtime evaluador: `{runtime_fingerprint}`")
 
         if api_key:
             st.success("GEMINI_API_KEY: Configurada")
@@ -58,14 +62,22 @@ def render_app():
 
         st.markdown("---")
         st.markdown(
-            "**Pipeline Oficial:**\n"
+            "**Pipeline Oficial (1 llamada LLM):**\n"
             "1. Ingesta segura de ZIP en memoria\n"
-            "2. ContextBuilder (inventario y contexto neutral)\n"
-            f"3. Gemini LLM Judge (`{OFFICIAL_MODEL}`, $T=0.0$)\n"
-            "4. EvaluationValidator (verificación D1-D5 y scoring matemático)"
+            "2. Evidence Dossier (inventario y evidencia estructurada)\n"
+            f"3. Auditoría y calificación con `{OFFICIAL_MODEL}` ($T=0.0$)\n"
+            "4. Validación determinística de contrato y scoring matemático"
         )
 
-    # Verificación de API Key antes de permitir evaluar
+        st.markdown("---")
+        if st.button("🧹 Limpiar caché de evaluaciones", use_container_width=True):
+            clear_evaluation_cache()
+            st.session_state["evaluation_cache"] = {}
+            st.session_state["outcomes"] = []
+            st.success("Caché limpiado correctamente.")
+            st.rerun()
+
+    # Verificación de API Key
     if not api_key:
         st.error(
             "⚠️ No se encontró la variable GEMINI_API_KEY. "
@@ -107,12 +119,13 @@ def render_app():
         for idx, uploaded_file in enumerate(uploaded_files):
             zip_bytes = uploaded_file.getvalue()
             zip_sha256 = hashlib.sha256(zip_bytes).hexdigest()
+            session_cache_key = f"{zip_sha256}:{runtime_fingerprint}:{OFFICIAL_MODEL}"
 
-            if zip_sha256 in st.session_state["evaluation_cache"]:
+            if session_cache_key in st.session_state["evaluation_cache"]:
                 status_box.info(f"⚡ Recuperando de caché (0 llamadas LLM): **{uploaded_file.name}** ({idx + 1}/{total_files})...")
-                outcome = st.session_state["evaluation_cache"][zip_sha256]
+                outcome = st.session_state["evaluation_cache"][session_cache_key]
             else:
-                status_box.info(f"⏳ Evaluando **{uploaded_file.name}** ({idx + 1}/{total_files})...")
+                status_box.info(f"⏳ Evaluando **{uploaded_file.name}** ({idx + 1}/{total_files}): Ingesta -> Evidence Dossier -> Gemini -> Validación...")
                 try:
                     res = evaluate_simple_zip(
                         zip_source=zip_bytes,
@@ -125,7 +138,7 @@ def render_app():
                         status="OK",
                         result=res,
                     )
-                    st.session_state["evaluation_cache"][zip_sha256] = outcome
+                    st.session_state["evaluation_cache"][session_cache_key] = outcome
                 except Exception as exc:
                     outcome = ProjectEvaluationOutcome(
                         project_name=uploaded_file.name,
@@ -197,44 +210,9 @@ def render_app():
                     continue
 
                 res = o.result
-                payload = o.payload
 
-                # A. Comprensión del proyecto
-                st.markdown("#### A. COMPRENSIÓN DEL PROYECTO")
-                if payload and payload.project_understanding:
-                    pu = payload.project_understanding
-                    st.markdown(f"**Resumen del sistema:**\n{pu.system_summary}")
-                    st.markdown(f"**Arquitectura observada:**\n{pu.architecture_observed}")
-                    if pu.main_technologies:
-                        st.markdown(f"**Tecnologías principales:** {', '.join(pu.main_technologies)}")
-                else:
-                    st.info("Sin datos de comprensión del proyecto.")
-
-                # B. Hallazgos
-                st.markdown("#### B. HALLAZGOS")
-                if payload and payload.findings:
-                    for i, f in enumerate(payload.findings, 1):
-                        sev_badge = {
-                            "high": "🔴 ALTA",
-                            "medium": "🟠 MEDIA",
-                            "low": "🟡 BAJA",
-                            "info": "🔵 INFO",
-                        }.get(f.severity, f.severity.upper())
-
-                        cat_name = f.category.upper()
-                        files_str = ", ".join(f.files) if f.files else "Ninguno"
-
-                        with st.container():
-                            st.markdown(f"**{i}. [{sev_badge}] Categoría: `{cat_name}`**")
-                            st.markdown(f"- **Hallazgo:** {f.finding}")
-                            st.markdown(f"- **Archivos de referencia:** `{files_str}`")
-                            st.markdown(f"- **Impacto en evaluación:** {f.impact_on_evaluation}")
-                            st.markdown("")
-                else:
-                    st.info("No se registraron hallazgos específicos.")
-
-                # C. Dimensiones D1-D5
-                st.markdown("#### C. DIMENSIONES D1 - D5")
+                # A. Dimensiones D1-D5
+                st.markdown("#### A. DIMENSIONES D1 - D5")
                 if res and res.dimensions:
                     for dim in res.dimensions:
                         col_d1, col_d2 = st.columns([1, 4])
@@ -256,20 +234,24 @@ def render_app():
                                     st.markdown(f"  - `{ev}`")
                         st.divider()
 
-                # D. Integridad
-                st.markdown("#### D. INTEGRIDAD")
-                if res and res.integrity_notes:
-                    for note in res.integrity_notes:
-                        st.warning(note)
-                else:
-                    st.success("Sin anomalías de integridad detectadas.")
-
-                # E. Mejora Prioritaria
-                st.markdown("#### E. MEJORA PRIORITARIA")
+                # B. Mejora Prioritaria
+                st.markdown("#### B. MEJORA PRIORITARIA")
                 if res and res.concrete_improvement:
                     st.info(f"💡 {res.concrete_improvement}")
 
-                # F. Descargar JSON
+                # C. Integridad y Telemetría
+                st.markdown("#### C. INTEGRIDAD Y TELEMETRÍA")
+                st.caption(f"Runtime: `{res.runtime_fingerprint or runtime_fingerprint}` · Modelo: `{res.actual_model_used or OFFICIAL_MODEL}`")
+                if res and res.integrity_notes:
+                    for note in res.integrity_notes:
+                        if "[TELEMETRÍA]" in note or "[INGESTA_ZIP]" in note:
+                            st.caption(note)
+                        else:
+                            st.warning(note)
+                else:
+                    st.success("Sin anomalías de integridad detectadas.")
+
+                # D. Descargar JSON
                 if res:
                     st.download_button(
                         label=f"📥 Descargar JSON ({o.project_name})",
