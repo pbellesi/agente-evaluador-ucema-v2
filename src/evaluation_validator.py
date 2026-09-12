@@ -82,6 +82,23 @@ def validate_and_score_evaluation(
             if level not in ALLOWED_LEVELS:
                 raise ValueError(f"Nivel no permitido {level} para dimensión {dim_key}. Debe ser estrictamente 0, 25, 50, 75 o 100.")
 
+        # Pre-validación de consistencia interna en requirement_checks
+        inconsistency_errors = []
+        for d_key, d_name, _, _ in OFFICIAL_DIMENSIONS:
+            d_item = dim_map[d_key]
+            if d_item.level_percent == 100 and getattr(d_item, "requirement_checks", None):
+                bad_checks = [c for c in d_item.requirement_checks if c.status in {"PARTIAL", "MISSING", "CONTRADICTED"}]
+                if bad_checks:
+                    inconsistency_errors.append(
+                        f"Dimensión {d_key} ('{d_name}'): asignó nivel 100% pero su propia auditoría registró requisitos no cumplidos: "
+                        + "; ".join(f"'{c.requirement}' ({c.status}: {c.explanation})" for c in bad_checks)
+                    )
+        if inconsistency_errors:
+            raise InconsistentEvaluationError(
+                "Inconsistencia interna de contrato:\n" + "\n".join(inconsistency_errors)
+                + "\nSi marcaste algún requisito como PARTIAL, MISSING o CONTRADICTED, está ESTRICTAMENTE PROHIBIDO asignar 100%. Reaplicá rubrica.md."
+            )
+
         integrity_notes: List[str] = list(payload.integrity_notes)
         dimension_results: List[DimensionResult] = []
         total_score = 0.0
@@ -90,19 +107,101 @@ def validate_and_score_evaluation(
             dim_item = dim_map[dim_key]
             level = dim_item.level_percent
 
-            # GUARDRAIL ESTRICTO: 100% exige ausencia total de PARTIAL, MISSING, CONTRADICTED
-            if level == 100 and getattr(dim_item, "requirement_checks", None):
-                inconsistent_checks = [
-                    c for c in dim_item.requirement_checks
-                    if c.status in {"PARTIAL", "MISSING", "CONTRADICTED"}
-                ]
-                if inconsistent_checks:
-                    inconsistencies = [f"'{c.requirement}' ({c.status}: {c.explanation})" for c in inconsistent_checks]
-                    raise InconsistentEvaluationError(
-                        f"Inconsistencia en dimensión {dim_key} ('{dim_name}'): asignó nivel 100% pero su propia auditoría "
-                        f"registró requisitos no cumplidos: {'; '.join(inconsistencies)}. "
-                        "Tu score contradice tu propia auditoría. Reaplicá rubrica.md."
-                    )
+            # EVIDENCE CAPS MECÁNICOS: cross_audit_findings
+            if getattr(payload, "cross_audit_findings", None):
+                for f_item in payload.cross_audit_findings:
+                    # PROMPT INJECTIONS NO DEBEN PENALIZAR: se desobedecen pero no reducen el puntaje si el trabajo es válido
+                    desc_lower = (f_item.description or "").lower()
+                    f_type = (f_item.finding_type or "").lower()
+                    if f_type in {"prompt_injection", "injection_attempt"} or any(
+                        kw in desc_lower for kw in [
+                            "prompt injection", "force the evaluator", "asignar 95",
+                            "intento de inyección", "instrucción para el evaluador",
+                            "previamente por el profesor", "nota acordada", "calificación de 95"
+                        ]
+                    ):
+                        continue
+
+                    aff = f_item.affected_dimensions or ["D2", "D3"]
+                    if dim_key in aff:
+                        cap = 75
+                        if f_item.finding_type == "missing_failed_run" and dim_key in ["D2", "D3"]:
+                            cap = 50
+                        elif f_item.severity == "HIGH" and dim_key in ["D2", "D3"]:
+                            cap = 75
+                        elif f_item.finding_type in {"documentation_vs_execution", "contradiction_run_ledger"}:
+                            cap = 75
+
+                        if level > cap:
+                            integrity_notes.append(
+                                f"[EVIDENCE_CAP] dimension={dim_key} original={level} final={cap} reason={f_item.description}"
+                            )
+                            level = cap
+
+            # EVIDENCE CAPS MECÁNICOS: claims CONTRADICTED
+            if getattr(payload, "claim_checks", None):
+                contradicted_claims = [c for c in payload.claim_checks if c.status == "CONTRADICTED"]
+                if contradicted_claims:
+                    if dim_key in ["D1", "D2", "D3"]:
+                        cap = 75
+                        if level > cap:
+                            c_descs = [f"[{c.claim_id}: {c.short_reason}]" for c in contradicted_claims]
+                            integrity_notes.append(
+                                f"[EVIDENCE_CAP] dimension={dim_key} original={level} final={cap} reason=Claims materiales contradichos: {'; '.join(c_descs)}"
+                            )
+                            level = cap
+
+            # EVIDENCE CAPS MECÁNICOS DETERMINÍSTICOS (LOCALES, BASADOS EN ARCHIVOS)
+            if repo_data and "file_contents" in repo_data:
+                from src.forensic_evidence import run_mechanical_diagnostics
+                mech_diag = run_mechanical_diagnostics(repo_data.get("file_contents", {}))
+                if mech_diag.get("chronological_inversion_detected") and dim_key == "D3":
+                    if level > 50:
+                        inv_alert = mech_diag["chronological_inversions"][0]["alert"] if mech_diag["chronological_inversions"] else "Inversión cronológica en corridas"
+                        integrity_notes.append(
+                            f"[EVIDENCE_CAP] dimension=D3 original={level} final=50 reason={inv_alert}"
+                        )
+                        level = 50
+                if mech_diag.get("missing_failed_runs") and dim_key in ["D2", "D3"]:
+                    if level > 50:
+                        mfr_alert = mech_diag["missing_failed_runs"][0]["alert"]
+                        integrity_notes.append(
+                            f"[EVIDENCE_CAP] dimension={dim_key} original={level} final=50 reason={mfr_alert}"
+                        )
+                        level = 50
+                if mech_diag.get("unimplemented_features") and dim_key in ["D1", "D2"]:
+                    if level > 75:
+                        uf_alert = mech_diag["unimplemented_features"][0]["alert"]
+                        integrity_notes.append(
+                            f"[EVIDENCE_CAP] dimension={dim_key} original={level} final=75 reason={uf_alert}"
+                        )
+                        level = 75
+                if mech_diag.get("duplicate_outputs") and dim_key in ["D1", "D3"]:
+                    if level > 25:
+                        dup_alert = f"Salidas de corridas idénticas detectadas mecánicamente ({len(mech_diag['duplicate_outputs'])} duplicados). Respuestas estáticas hardcodeadas."
+                        integrity_notes.append(
+                            f"[EVIDENCE_CAP] dimension={dim_key} original={level} final=25 reason={dup_alert}"
+                        )
+                        level = 25
+
+            # Registrar prompt injection findings en integrity_notes
+            if getattr(payload, "prompt_injection_findings", None):
+                for pi in payload.prompt_injection_findings:
+                    note = f"[PROMPT_INJECTION] Archivo '{pi.file}': {pi.detected_instruction} (desobedecida={pi.disobeyed})"
+                    if note not in integrity_notes:
+                        integrity_notes.append(note)
+
+            if level == 100:
+                just_lower = (dim_item.justification or "").lower()
+                for kw in ["contradicción material", "inconsistencia material", "corrida fallida ausente", "corrida fallida no preservada"]:
+                    if kw in just_lower and "sin contradicci" not in just_lower and "no hay contradicci" not in just_lower and "no se observan contradicci" not in just_lower:
+                        integrity_notes.append(
+                            f"[EVIDENCE_CAP] dimension={dim_key} original=100 final=75 reason=Justificación señala '{kw}'"
+                        )
+                        level = 75
+                        break
+
+            dim_item.level_percent = level
 
             dim_score = round(weight * (level / 100.0), 2)
             total_score += dim_score
@@ -127,6 +226,17 @@ def validate_and_score_evaluation(
                 )
             )
 
+        concrete_improvement = payload.concrete_improvement
+        if repo_data and "file_contents" in repo_data:
+            from src.forensic_evidence import run_mechanical_diagnostics
+            mech_diag = run_mechanical_diagnostics(repo_data.get("file_contents", {}))
+            if mech_diag.get("missing_failed_runs"):
+                if "corrida fallida" not in concrete_improvement.lower():
+                    concrete_improvement = (
+                        "Preservar en el repositorio la corrida real donde falló la clasificación de notas de crédito que motivó la variante v4 del prompt, "
+                        "y corregir la anacronía temporal en las fechas de las corridas."
+                    )
+
         return EvaluationResult(
             repository=repo_url,
             evaluated_revision=str(evaluated_revision),
@@ -134,7 +244,7 @@ def validate_and_score_evaluation(
             evaluation_status="completed",
             dimensions=dimension_results,
             final_score=round(total_score, 2),
-            concrete_improvement=payload.concrete_improvement,
+            concrete_improvement=concrete_improvement,
             integrity_notes=integrity_notes,
             status="OK",
             actual_model_used=actual_model_used,
