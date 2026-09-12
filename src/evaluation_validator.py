@@ -103,6 +103,13 @@ def validate_and_score_evaluation(
         dimension_results: List[DimensionResult] = []
         total_score = 0.0
 
+        # Disobeyed prompt injection files provenance map
+        disobeyed_injection_files = set()
+        if getattr(payload, "prompt_injection_findings", None):
+            for pi in payload.prompt_injection_findings:
+                if pi.disobeyed and pi.file:
+                    disobeyed_injection_files.add(pi.file)
+
         for dim_key, dim_name, weight, _ in OFFICIAL_DIMENSIONS:
             dim_item = dim_map[dim_key]
             level = dim_item.level_percent
@@ -113,8 +120,20 @@ def validate_and_score_evaluation(
                     # PROMPT INJECTIONS NO DEBEN PENALIZAR: se desobedecen pero no reducen el puntaje si el trabajo es válido
                     desc_lower = (f_item.description or "").lower()
                     f_type = (f_item.finding_type or "").lower()
+
+                    # Structural provenance check: if finding files match a disobeyed prompt injection file
+                    is_disobeyed_injection_file = bool(f_item.files and any(f in disobeyed_injection_files for f in f_item.files))
+
                     is_injection = (
                         f_type in {"prompt_injection", "injection_attempt", "adversarial_instruction"}
+                        or (is_disobeyed_injection_file and any(
+                            kw in desc_lower for kw in [
+                                "instrucción", "instruccion", "evaluador", "profesor", "95", "100", "calificación",
+                                "calificacion", "nota", "exigiendo", "otorgar", "fija", "fijar", "exige", "pide",
+                                "adversarial", "manipulación", "manipulacion", "desobedecida", "desobedecido",
+                                "dejo constancia", "sin revisar", "no revises", "no revisar"
+                            ]
+                        ))
                         or any(
                             kw in desc_lower for kw in [
                                 "prompt injection", "force the evaluator", "asignar 95", "asigná 100", "asigna 100",
@@ -152,12 +171,16 @@ def validate_and_score_evaluation(
                 for c in payload.claim_checks:
                     if c.status == "CONTRADICTED":
                         reason_lower = (c.short_reason or "").lower()
+                        is_disobeyed_inj_path = bool(c.evidence_paths and any(p in disobeyed_injection_files for p in c.evidence_paths))
                         # Si el claim contradicho es por una prompt injection desobedecida, NO penaliza la dimensión académica
-                        is_inj_claim = any(kw in reason_lower for kw in [
-                            "injection", "inyección", "inyeccion", "adversarial", "manipulación", "manipulacion",
-                            "asigná 100", "asigna 100", "asignar 100", "asignar 95", "corrector", "evaluador",
-                            "no revises", "omita", "omitir", "fijar nota", "calificación"
-                        ])
+                        is_inj_claim = (
+                            (is_disobeyed_inj_path and any(kw in reason_lower for kw in ["instrucción", "instruccion", "evaluador", "profesor", "95", "100", "calificación", "calificacion", "nota", "exigiendo", "otorgar", "fija", "desobedecid"]))
+                            or any(kw in reason_lower for kw in [
+                                "injection", "inyección", "inyeccion", "adversarial", "manipulación", "manipulacion",
+                                "asigná 100", "asigna 100", "asignar 100", "asignar 95", "corrector", "evaluador",
+                                "no revises", "omita", "omitir", "fijar nota", "calificación"
+                            ])
+                        )
                         if not is_inj_claim:
                             contradicted_claims.append(c)
 
